@@ -3,21 +3,999 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parental Leave Calculator</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; }
-        .container { text-align: center; padding: 2rem; max-width: 600px; }
-        h1 { font-size: 2.5rem; margin-bottom: 1rem; }
-        p { font-size: 1.2rem; opacity: 0.9; line-height: 1.6; }
-        .badge { display: inline-block; margin-top: 2rem; padding: 0.5rem 1.5rem; border: 2px solid rgba(255,255,255,0.5); border-radius: 999px; font-size: 0.9rem; opacity: 0.8; }
-    </style>
+    <meta name="description" content="Canadian parental leave calculator for 2026. Model EI and QPIP benefits, employer top-ups, and leave-splitting scenarios to maximize your family's income.">
+    <title>Parental Leave Calculator — Canada</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
-<body>
-    <div class="container">
-        <h1>Parental Leave Calculator</h1>
-        <p>Calculate your parental leave entitlements, benefits, and plan your time off with confidence.</p>
-        <span class="badge">Coming Soon</span>
+<body style="margin:0;padding:0">
+    <div id="root"></div>
+    <script type="text/babel">
+const { useState, useMemo, useEffect } = React;
+
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
+const EI = { mie: 68900, stdRate: 0.55, extRate: 0.33, maxStd: 729, maxExt: 437, matWk: 15, stdTotal: 40, stdMax1: 35, stdBonus: 5, extTotal: 69, extMax1: 61, extBonus: 8 };
+const QPIP = {
+  mie: 103000,
+  basic: { matWk: 18, matR: 0.70, patWk: 5, patR: 0.70, parWk: 28, parR1: 0.70, parN1: 7, parR2: 0.55, parN2: 21, bonusWk: 4, bonusR: 0.55 },
+  special: { matWk: 15, matR: 0.75, patWk: 3, patR: 0.75, parWk: 25, parR: 0.75, bonusWk: 3, bonusR: 0.75 },
+};
+const PROVS = [
+  { c: "ON", n: "Ontario", mJP: 17, pJP: 63, q: false }, { c: "BC", n: "British Columbia", mJP: 17, pJP: 62, q: false },
+  { c: "AB", n: "Alberta", mJP: 16, pJP: 62, q: false }, { c: "SK", n: "Saskatchewan", mJP: 19, pJP: 63, q: false },
+  { c: "MB", n: "Manitoba", mJP: 17, pJP: 63, q: false }, { c: "QC", n: "Quebec (QPIP)", mJP: 18, pJP: 65, q: true },
+  { c: "NB", n: "New Brunswick", mJP: 17, pJP: 63, q: false }, { c: "NS", n: "Nova Scotia", mJP: 17, pJP: 63, q: false },
+  { c: "PE", n: "Prince Edward Island", mJP: 17, pJP: 63, q: false }, { c: "NL", n: "Newfoundland", mJP: 17, pJP: 63, q: false },
+  { c: "FED", n: "Federal (banks, telecom)", mJP: 17, pJP: 63, q: false },
+];
+const PRESETS = [
+  { l: "No top-up", p: 0, w: 0 }, { l: "75% for 17 weeks", p: 75, w: 17 }, { l: "80% for 17 weeks", p: 80, w: 17 },
+  { l: "93% for 17 weeks", p: 93, w: 17 }, { l: "95% for 26 weeks", p: 95, w: 26 }, { l: "100% for 17 weeks", p: 100, w: 17 }, { l: "Custom", p: -1, w: -1 },
+];
+
+const fmt = n => new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
+const wkEI = (sal, rate, max) => Math.min((Math.min(sal, EI.mie) / 52) * rate, max);
+const wkQP = (sal, rate) => (Math.min(sal, QPIP.mie) / 52) * rate;
+const topUpDiff = (sal, pct, ben) => Math.max(0, (sal / 52) * (pct / 100) - ben);
+
+// ─── CALC ENGINE ─────────────────────────────────────────────────────────────
+function calc(bp, op, type, qPlan, bpPW, opPW) {
+  const isQ = bp.prov.q || op.prov.q, isStd = type === "standard";
+  let r = { bp: { wks: [], ben: 0, top: 0, tot: 0 }, op: { wks: [], ben: 0, top: 0, tot: 0 }, fam: 0, gap: 0, warn: [] };
+  const push = (arr, t, b, tu) => arr.push({ t, b, tu, tot: b + tu });
+
+  if (!isQ) {
+    const rate = isStd ? EI.stdRate : EI.extRate, max = isStd ? EI.maxStd : EI.maxExt;
+    const bpMat = wkEI(bp.sal, EI.stdRate, EI.maxStd), bpPar = wkEI(bp.sal, rate, max), opPar = wkEI(op.sal, rate, max);
+    for (let i = 0; i < EI.matWk; i++) push(r.bp.wks, "Maternity", bpMat, bp.hasMT && i < bp.mtW ? topUpDiff(bp.sal, bp.mtP, bpMat) : 0);
+    for (let i = 0; i < bpPW; i++) push(r.bp.wks, "Parental", bpPar, bp.hasPT && i < bp.ptW ? topUpDiff(bp.sal, bp.ptP, bpPar) : 0);
+    for (let i = 0; i < opPW; i++) push(r.op.wks, "Parental", opPar, op.hasT && i < op.tW ? topUpDiff(op.sal, op.tP, opPar) : 0);
+  } else {
+    const pl = qPlan === "basic" ? QPIP.basic : QPIP.special;
+    for (let i = 0; i < pl.matWk; i++) { const w = wkQP(bp.sal, pl.matR); push(r.bp.wks, "Mat(QPIP)", w, bp.hasMT && i < bp.mtW ? topUpDiff(bp.sal, bp.mtP, w) : 0); }
+    for (let i = 0; i < pl.patWk; i++) { const w = wkQP(op.sal, pl.patR); push(r.op.wks, "Pat(QPIP)", w, op.hasT && i < op.tW ? topUpDiff(op.sal, op.tP, w) : 0); }
+    if (qPlan === "basic") {
+      let bc = Math.min(bpPW, pl.parWk), oc = Math.min(opPW, pl.parWk - bc);
+      for (let i = 0; i < bc; i++) { const rt = i < pl.parN1 ? pl.parR1 : pl.parR2; const w = wkQP(bp.sal, rt); push(r.bp.wks, "Par(QPIP)", w, bp.hasPT && i < bp.ptW ? topUpDiff(bp.sal, bp.ptP, w) : 0); }
+      for (let i = 0; i < oc; i++) { const rt = (bc + i) < pl.parN1 ? pl.parR1 : pl.parR2; const w = wkQP(op.sal, rt); push(r.op.wks, "Par(QPIP)", w, op.hasT && (pl.patWk + i) < op.tW ? topUpDiff(op.sal, op.tP, w) : 0); }
+      // Sharing bonus: 4 extra weeks at 55% if both parents take 8+ shareable weeks
+      if (bc >= 8 && oc >= 8) {
+        const bonusPerParent = 2; // 4 bonus weeks split evenly
+        for (let i = 0; i < bonusPerParent; i++) { const w = wkQP(bp.sal, pl.parR2); push(r.bp.wks, "Bonus(QPIP)", w, 0); }
+        for (let i = 0; i < bonusPerParent; i++) { const w = wkQP(op.sal, pl.parR2); push(r.op.wks, "Bonus(QPIP)", w, 0); }
+      }
+    } else {
+      let bc = Math.min(bpPW, pl.parWk), oc = Math.min(opPW, pl.parWk - bc);
+      for (let i = 0; i < bc; i++) { const w = wkQP(bp.sal, pl.parR); push(r.bp.wks, "Par(QPIP)", w, bp.hasPT && i < bp.ptW ? topUpDiff(bp.sal, bp.ptP, w) : 0); }
+      for (let i = 0; i < oc; i++) { const w = wkQP(op.sal, pl.parR); push(r.op.wks, "Par(QPIP)", w, op.hasT && (pl.patWk + i) < op.tW ? topUpDiff(op.sal, op.tP, w) : 0); }
+      // Sharing bonus: 3 extra weeks at 75% if both parents take 6+ shareable weeks
+      if (bc >= 6 && oc >= 6) {
+        const w1 = wkQP(bp.sal, pl.parR), w2 = wkQP(op.sal, pl.parR);
+        push(r.bp.wks, "Bonus(QPIP)", w1, 0); push(r.bp.wks, "Bonus(QPIP)", w1, 0);
+        push(r.op.wks, "Bonus(QPIP)", w2, 0);
+      }
+    }
+  }
+  [r.bp, r.op].forEach(p => { p.ben = p.wks.reduce((s, w) => s + w.b, 0); p.top = p.wks.reduce((s, w) => s + w.tu, 0); p.tot = p.ben + p.top; });
+  r.fam = r.bp.tot + r.op.tot;
+  const tw = Math.max(r.bp.wks.length, r.op.wks.length);
+  r.gap = ((bp.sal + op.sal) / 52) * tw - r.fam;
+  if (!isQ) {
+    const mx = isStd ? EI.stdMax1 : EI.extMax1, tot = isStd ? EI.stdTotal : EI.extTotal;
+    if (bpPW > mx) r.warn.push(`Birthing parent exceeds ${mx}-week max.`);
+    if (opPW > mx) r.warn.push(`Other parent exceeds ${mx}-week max.`);
+    if (bpPW + opPW > tot) r.warn.push(`Combined weeks exceed ${tot}-week pool.`);
+  }
+  return r;
+}
+
+// ─── REFERENCES ──────────────────────────────────────────────────────────────
+const REFS = {
+  ei_rates: { t: "Canada.ca \u2013 EI Benefit Amounts", u: "https://www.canada.ca/en/services/benefits/ei/ei-maternity-parental/benefit-amount.html" },
+  ei_self: { t: "Canada.ca \u2013 EI for Self-Employed", u: "https://www.canada.ca/en/services/benefits/ei/ei-self-employed-workers.html" },
+  ei_sub: { t: "Canada.ca \u2013 Supplementing Benefits", u: "https://www.canada.ca/en/employment-social-development/programs/ei/ei-list/ei-employers-maternity-parental-benefits.html" },
+  ei_digest: { t: "Canada.ca \u2013 Digest Ch.13", u: "https://www.canada.ca/en/employment-social-development/programs/ei/ei-list/reports/digest/chapter-13/parental-benefits-payments.html" },
+  on_esa: { t: "Ontario.ca \u2013 Pregnancy & Parental Leave", u: "https://www.ontario.ca/document/your-guide-employment-standards-act-0/pregnancy-and-parental-leave" },
+  qpip: { t: "QPIP \u2013 Features", u: "https://www.rqap.gouv.qc.ca/en/about-the-plan/general-information/features" },
+  ccb: { t: "Canada.ca \u2013 Canada Child Benefit", u: "https://www.canada.ca/en/revenue-agency/services/child-family-benefits/canada-child-benefit/how-much.html" },
+  statscan: { t: "Statistics Canada \u2013 Parental Leave 1997\u20132022", u: "https://www150.statcan.gc.ca/n1/pub/14-28-0001/2023001/article/00009-eng.htm" },
+  workzoom: { t: "Workzoom \u2013 Parental Leave 2026", u: "https://www.workzoom.com/blog/parental-leave-canada-2026-employer-guide/" },
+  benefits_survey: { t: "Benefits Canada \u2013 Top-Up Survey", u: "https://www.benefitscanada.com/benefits/absence-management/more-canadian-employers-topping-up-maternity-leave-than-parental-leave-survey/" },
+  cbc_layoff: { t: "CBC \u2013 Mom denied EI (Jan 2026)", u: "https://www.cbc.ca/news/canada/montreal/quebec-mother-denied-ei-benefits-after-maternity-and-parental-leave-9.7053440" },
+  ywca: { t: "YWCA \u2013 Sharing Leave Benefits", u: "https://ywcavan.org/blog/2020/03/benefits-sharing-parental-leave" },
+  cfib: { t: "CFIB \u2013 EI Self-Employed", u: "https://www.cfib-fcei.ca/en/tools-resources/ei-when-youre-self-employed" },
+  topup_rules: { t: "Whitten & Lublin \u2013 Top-Up Rules", u: "https://toronto-employmentlawyer.com/blog/employment-contracts/top-up-maternity-leave/" },
+  tax_plan: { t: "TaxTool.ca \u2013 Tax Planning", u: "https://taxtool.ca/tax-planning-for-maternity-and-parental-leaves/" },
+};
+
+function getRecs(bp, op, type, isQ, result, bpPW, opPW) {
+  const recs = [], isStd = type === "standard";
+  const rate = isStd ? EI.stdRate : EI.extRate, max = isStd ? EI.maxStd : EI.maxExt;
+  const mxPP = isStd ? EI.stdMax1 : EI.extMax1;
+  const totP = isStd ? EI.stdTotal : EI.extTotal;
+  const bpLoss = bp.sal / 52 - wkEI(bp.sal, rate, max), opLoss = op.sal / 52 - wkEI(op.sal, rate, max);
+
+  // Salary differential — suggest lower earner take more, but only if they have room
+  if (!isQ && Math.abs(bp.sal - op.sal) > 15000) {
+    const higherIsOp = op.sal > bp.sal;
+    const lowerLbl = higherIsOp ? "birthing parent" : "other parent";
+    const higherLbl = higherIsOp ? "other parent" : "birthing parent";
+    const hasTopUp = higherIsOp ? (op.hasT && op.tP > 0) : (bp.hasPT && bp.ptP > 0);
+    const lowerCurrentWks = higherIsOp ? bpPW : opPW;
+    const lowerMaxWks = mxPP;
+    const roomToShift = Math.min(5, lowerMaxWks - lowerCurrentWks, higherIsOp ? opPW : bpPW);
+    if (!hasTopUp && roomToShift > 0) {
+      const sv = Math.round(Math.abs(bpLoss - opLoss));
+      if (sv > 100) recs.push({ tp: "opt", icon: "\uD83D\uDCB0", title: `Consider having the ${lowerLbl} take more parental weeks`,
+        body: `The ${higherLbl} earns ${fmt(Math.abs(bp.sal - op.sal))} more/yr. Without a top-up, each week they're on leave costs ~${fmt(sv)} more than the ${lowerLbl}. There's room to shift up to ${roomToShift} weeks, saving ~${fmt(sv * roomToShift)}.`, ref: REFS.ei_rates });
+    }
+  }
+  const bpGood = (bp.hasMT && bp.mtP >= 80) || (bp.hasPT && bp.ptP >= 80), opGood = op.hasT && op.tP >= 80;
+  if (bpGood && !opGood && opPW > 10 && bpPW < mxPP)
+    recs.push({ tp: "opt", icon: "\uD83D\uDCCB", title: "Birthing parent's top-up covers more of the gap",
+      body: `Their strong employer top-up makes their weeks cheaper for the family. They currently have ${mxPP - bpPW} more parental weeks available (max ${mxPP}). Consider having them take more, with the other parent taking fewer but still enough to trigger the ${isStd ? "5" : "8"}-week sharing bonus.`, ref: REFS.ei_sub });
+  if (!bpGood && opGood && bpPW > 10 && opPW < mxPP)
+    recs.push({ tp: "opt", icon: "\uD83D\uDCCB", title: "Other parent's top-up could save money",
+      body: `Their employer top-up reduces the income gap. They currently have ${mxPP - opPW} more parental weeks available (max ${mxPP}). Shifting more weeks to them lowers total family income loss.`, ref: REFS.ei_sub });
+  if (!isQ && (bpPW === 0 || opPW === 0)) {
+    const bonus = isStd ? EI.stdBonus : EI.extBonus;
+    recs.push({ tp: "warn", icon: "\u26A0\uFE0F", title: `You're leaving ${bonus} bonus weeks on the table`,
+      body: `When both parents take parental leave, you unlock ${bonus} extra weeks. Even 5 weeks from the other parent triggers this "use-it-or-lose-it" provision. (Source: Canada.ca Digest Ch.13)`, ref: REFS.ei_digest });
+  }
+  if ((bp.selfEmp || op.selfEmp) && !isQ) {
+    const who = bp.selfEmp && op.selfEmp ? "Both parents" : (bp.selfEmp ? "Birthing parent" : "Other parent");
+    recs.push({ tp: "warn", icon: "\uD83D\uDEA8", title: `${who}: verify EI self-employed opt-in`,
+      body: `Self-employed workers must opt into EI special benefits 12+ months before claiming. Need $8,826+ in prior-year net self-employment earnings. Benefits based on prior calendar year's income, not last 52 weeks. Once benefits are received, you cannot opt out \u2014 premiums are permanent. But a full 50 weeks of benefits covers ~30 years of premiums. (Sources: Canada.ca EI Self-Employed; CFIB; Stark & Marsh)`, ref: REFS.ei_self });
+  }
+  if ((bp.selfEmp || op.selfEmp) && isQ)
+    recs.push({ tp: "pos", icon: "\u2705", title: "QPIP covers self-employed automatically",
+      body: `Quebec's QPIP covers self-employed with just $2,000+ in earnings \u2014 no opt-in needed. Benefit rates are higher (70-75%) with $103,000 MIE vs federal EI's $68,900. (Source: QPIP Features)`, ref: REFS.qpip });
+  if (!isQ && bp.sal > EI.mie && op.sal > EI.mie)
+    recs.push({ tp: "info", icon: "\uD83D\uDCCA", title: "Both salaries exceed the EI cap",
+      body: `Both earn above $${(EI.mie / 1000).toFixed(1)}K, so you'll both get the max benefit ($${max}/wk) regardless. Focus on top-ups and career impact rather than maximizing EI. (Source: Canada.ca EI Benefit Amounts)`, ref: REFS.ei_rates });
+  if (bp.sal + op.sal > 80000)
+    recs.push({ tp: "pos", icon: "\uD83D\uDC76", title: "Reduced income may boost your Canada Child Benefit",
+      body: `CCB is recalculated every July based on prior-year family net income. Max is $7,997/yr per child under 6 for families with AFNI under $37,487. (Source: Canada.ca CCB)`, ref: REFS.ccb });
+  if (bp.tenure === "<13wk")
+    recs.push({ tp: "warn", icon: "\u23F0", title: "Birthing parent: tenure may be too short for job protection",
+      body: `Most provinces require 13 weeks of employment before the due date. You may qualify for EI (600 insurable hours) but your job may not be protected. (Source: Ontario.ca ESA)`, ref: REFS.on_esa });
+  return recs;
+}
+
+function RecCard({ rec }) {
+  const bg = rec.tp === "warn" ? "#fef8f0" : rec.tp === "opt" ? "#f0f7f3" : rec.tp === "pos" ? "#f4f9f6" : "#f8f6f3";
+  const bdr = rec.tp === "warn" ? "#f0d070" : "#8ac4a0";
+  return (
+    <div style={{ background: bg, border: `1px solid ${bdr}`, borderRadius: 14, padding: "16px 20px", marginBottom: 12 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "var(--fd)", marginBottom: 6, color: "#2d2520" }}>{rec.icon} {rec.title}</div>
+      <p style={{ fontSize: 13, lineHeight: 1.65, color: "#5c4f44", margin: 0 }}>{rec.body}</p>
+      {rec.ref && <a href={rec.ref.u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#a0937f", textDecoration: "underline", fontStyle: "italic", marginTop: 4, display: "inline-block" }}>{rec.ref.t}</a>}
     </div>
+  );
+}
+
+// ─── SHARED STYLES ───────────────────────────────────────────────────────────
+const S = {
+  card: { background: "#fff", border: "1px solid #e6dfd6", borderRadius: 16, padding: "24px 28px", marginBottom: 20 },
+  label: { fontSize: 13, color: "#7a6e62", display: "block", marginBottom: 6, fontWeight: 500 },
+  select: { width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd5cb", fontSize: 14, background: "#faf8f5", color: "#2d2520", fontFamily: "inherit", appearance: "auto" },
+  hint: { fontSize: 12, color: "#a0937f", lineHeight: 1.5, marginTop: 4 },
+  badge: (bg) => ({ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: bg, color: "#fff", letterSpacing: "0.03em" }),
+};
+
+// ─── SMALL COMPONENTS ────────────────────────────────────────────────────────
+function Tip({ children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: "relative", display: "inline-block", marginLeft: 6, cursor: "pointer" }} onClick={() => setOpen(!open)} onMouseLeave={() => setOpen(false)}>
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", background: "#ebe5dc", color: "#8a7d6e", fontSize: 11, fontWeight: 700 }}>?</span>
+      {open && <div style={{ position: "absolute", bottom: 26, left: -100, width: 260, background: "#2d2520", color: "#e8ddd0", padding: "12px 16px", borderRadius: 12, fontSize: 12, lineHeight: 1.5, zIndex: 99, boxShadow: "0 8px 30px rgba(0,0,0,.2)" }}>{children}</div>}
+    </span>
+  );
+}
+
+function TopUpPicker({ hasTopUp, pct, weeks, onChange, label }) {
+  const [mode, setMode] = useState("No top-up");
+  const pick = v => { setMode(v); const p = PRESETS.find(x => x.l === v); if (p && p.p >= 0) onChange(p.p > 0, p.p, p.w); };
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={S.label}>{label}</label>
+      <select value={mode} onChange={e => pick(e.target.value)} style={S.select}>{PRESETS.map(p => <option key={p.l}>{p.l}</option>)}</select>
+      {mode === "Custom" && (
+        <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+          <div style={{ flex: 1 }}><label style={{ fontSize: 11, color: "#a0937f" }}>Top-up to %</label><input type="number" min={55} max={100} value={pct} onChange={e => onChange(true, +e.target.value, weeks)} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd5cb", fontSize: 14, marginTop: 3 }} /></div>
+          <div style={{ flex: 1 }}><label style={{ fontSize: 11, color: "#a0937f" }}>For # weeks</label><input type="number" min={0} max={78} value={weeks} onChange={e => onChange(true, pct, +e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd5cb", fontSize: 14, marginTop: 3 }} /></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Slider({ val, set, min, max, step, label, accent, suffix }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+        <span style={{ fontSize: 13, color: "#7a6e62" }}>{label}</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: "#2d2520", fontFamily: "var(--fd)" }}>{suffix === "$" ? fmt(val) : `${val} weeks`}</span>
+      </div>
+      <input type="range" min={min} max={max} step={step || 1} value={val} onChange={e => set(+e.target.value)} style={{ width: "100%", accentColor: accent || "#c27840" }} />
+    </div>
+  );
+}
+
+function Stat({ label, val, sub, color }) {
+  return (
+    <div style={{ textAlign: "center", padding: "10px 6px" }}>
+      <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "#9a8d80", marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 800, color: color || "#2d2520", fontFamily: "var(--fd)", lineHeight: 1.1 }}>{val}</div>
+      {sub && <div style={{ fontSize: 11, color: "#a0937f", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function Timeline({ r }) {
+  const mw = Math.max(r.bp.wks.length, r.op.wks.length, 1);
+  const mx = Math.max(...r.bp.wks.map(w => w.tot), ...r.op.wks.map(w => w.tot), 1);
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <div style={{ display: "flex", gap: 1, alignItems: "flex-end", height: 120, minWidth: mw * 10 }}>
+        {Array.from({ length: mw }, (_, i) => {
+          const bw = r.bp.wks[i], ow = r.op.wks[i];
+          return (
+            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1, alignItems: "center", minWidth: 4 }}>
+              {bw && <div title={`Wk${i + 1}: ${fmt(bw.tot)}`} style={{ width: "80%", height: (bw.tot / mx) * 90, borderRadius: 2, background: bw.tu > 0 ? "linear-gradient(180deg,#c27840,#d89a6a)" : "#c27840" }} />}
+              {ow && <div title={`Wk${i + 1}: ${fmt(ow.tot)}`} style={{ width: "80%", height: (ow.tot / mx) * 90, borderRadius: 2, background: ow.tu > 0 ? "linear-gradient(180deg,#4a7f5e,#6aad82)" : "#5a8f6e" }} />}
+              {(i === 0 || (i + 1) % 10 === 0) && <div style={{ fontSize: 8, color: "#b0a594", marginTop: 1 }}>{i + 1}</div>}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#7a6e62" }}><div style={{ width: 8, height: 8, borderRadius: 2, background: "#c27840" }} /> Birthing Parent</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#7a6e62" }}><div style={{ width: 8, height: 8, borderRadius: 2, background: "#5a8f6e" }} /> Other Parent</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── BLOG ARTICLES ───────────────────────────────────────────────────────────
+const ARTICLES = [
+  {
+    id: "standard-vs-extended",
+    title: "Standard vs. Extended Leave: Which Costs Your Family Less?",
+    tag: "Decision Guide", tagColor: "#c27840", readTime: "6 min",
+    preview: "The total dollar amount is roughly the same \u2014 but one option can cost you thousands more depending on your situation.",
+    refs: [
+      { t: "Canada.ca \u2013 EI Benefit Amounts (2026)", u: "https://www.canada.ca/en/services/benefits/ei/ei-maternity-parental/benefit-amount.html" },
+      { t: "Canada.ca \u2013 Supplementing Maternity/Parental Benefits", u: "https://www.canada.ca/en/employment-social-development/programs/ei/ei-list/ei-employers-maternity-parental-benefits.html" },
+      { t: "Canada.ca \u2013 Canada Child Benefit: How Much You Can Get", u: "https://www.canada.ca/en/revenue-agency/services/child-family-benefits/canada-child-benefit/how-much.html" },
+      { t: "Toronto Baby Guide \u2013 Maternity Leave Ontario 2026", u: "https://torontobabyguide.ca/maternity-leave-ontario/" },
+    ],
+    body: `Many parents assume extended leave (18 months) pays less overall than standard (12 months). The truth is more nuanced: the total payout is designed to be roughly equivalent \u2014 extended just spreads it thinner over more weeks. [1]
+
+Here's where the real difference shows up: for someone earning above the $68,900 MIE cap, standard parental leave pays the maximum $729/week while extended pays $437/week. Below that cap, the rate is 55% vs 33% of your weekly earnings. Over their respective durations, the total dollar amount is similar. But here are the catches most people miss:
+
+**Your employer top-up changes everything.** If your employer tops up to 93% for 17 weeks, the top-up bridges the gap between your EI rate and 93% of your salary. On standard leave (55% EI), the employer covers ~38%. On extended (33% EI), the gap is ~60%. Many employers cap their top-up at a fixed dollar amount, meaning you may get fewer topped-up weeks on extended leave. [2]
+
+**The CCB boost.** With lower annual income during an 18-month extended leave, your family's adjusted net income drops more significantly, potentially unlocking higher Canada Child Benefit payments the following July. For a family earning $130,000 combined, this could mean $1,500\u20133,000 more in CCB annually. The maximum CCB is $7,997/yr per child under 6 for families with AFNI under $37,487. [3]
+
+**The daycare calculation.** In cities like Toronto, daycare waitlists are 12\u201318 months. If you choose standard leave and your child doesn't have a spot yet, you may face unpaid months with no income and no EI. Extended leave buys time \u2014 and Ontario's subsidized childcare program reduces the urgency to return early. [4]
+
+**Real scenario:** Sarah and Amit earn $80,000 and $95,000. Sarah's employer offers 93% top-up for maternity only. With standard leave (15 weeks maternity + 30 weeks parental), Sarah receives the maximum $729/week EI plus ~$700/week top-up during maternity, then drops to $729/week with no top-up for parental. With extended, she gets the same topped-up maternity, then only $437/week for a longer parental stretch \u2014 but avoids 5 months of unpaid gap before daycare starts. Run both scenarios in the calculator to see which works better for your numbers.
+
+**When standard wins:** If both parents have strong employer top-ups that cover parental leave (not just maternity), standard keeps your weekly income higher. Also, if you're both above the $68,900 MIE cap, the EI portion is already maximized \u2014 so the top-up becomes the deciding factor, not the leave type. [1]`
+  },
+  {
+    id: "father-leave-guide",
+    title: "Dads, Here's Why Taking Leave Is the Best Career Move You'll Make",
+    tag: "For Dads", tagColor: "#5a8f6e", readTime: "5 min",
+    preview: "Only 11% of fathers outside Quebec take parental leave. The ones who do report stronger families and no career penalty.",
+    refs: [
+      { t: "Statistics Canada \u2013 Parental Leave, 1997 to 2022", u: "https://www150.statcan.gc.ca/n1/pub/14-28-0001/2023001/article/00009-eng.htm" },
+      { t: "Canada.ca \u2013 Digest of Benefit Entitlement, Chapter 13", u: "https://www.canada.ca/en/employment-social-development/programs/ei/ei-list/reports/digest/chapter-13/parental-benefits-payments.html" },
+      { t: "YWCA Vancouver \u2013 The Benefits of Sharing Parental Leave", u: "https://ywcavan.org/blog/2020/03/benefits-sharing-parental-leave" },
+      { t: "Pettigrew (2022) \u2013 Employers' Perceived Career Impact of Canada's Parental-Leave Extension, Merits Journal", u: "https://www.mdpi.com/2673-8104/2/3/13" },
+      { t: "Canadian Business \u2013 More Men Need to Take Parental Leave", u: "https://canadianbusiness.com/ideas/maternity-leave-parental-leave-canada/" },
+      { t: "Workzoom \u2013 Parental Leave in Canada: What Employers Need to Know (2026)", u: "https://www.workzoom.com/blog/parental-leave-canada-2026-employer-guide/" },
+    ],
+    body: `The statistics are stark: 85% of fathers in Quebec take parental leave, compared to just 11% in the rest of Canada. The difference? Quebec gives dads 5 dedicated weeks at 70% pay that can't be transferred \u2014 use it or lose it. [1]
+
+Outside Quebec, the federal "sharing bonus" tries to do the same thing: both parents must take some leave to unlock 5 extra weeks (standard) or 8 weeks (extended). But uptake remains low. [2]
+
+**The income fear.** In a 2018 Dove Men+Care survey, 75% of Canadian fathers said they'd like more time off but couldn't afford it. The math matters: for a dad earning $100,000, standard EI pays the maximum $729/week \u2014 roughly a 62% pay cut from the $1,923/week gross salary. Without an employer top-up, many families can't absorb that on top of the birthing parent's already-reduced income. [3]
+
+**The stigma reality.** University research found employers perceive extended leave as a career risk \u2014 and overwhelmingly assume women are taking it. In interviews with 46 Canadian employers, a large proportion felt longer leave would negatively impact careers, with gendered views about who should use it. When men take leave, they face a different stigma: not being "committed." [4]
+
+**The career case for sharing.** Women who take 12-month maternity leave are less likely to advance to management. A Statistics Canada study found 61% of companies had zero women on their boards. If both parents were equally likely to take time off, employers wouldn't have a systemic preference. When men take leave, it reduces stigma for everyone. [3]
+
+**The Angela story.** Angela, a Toronto project manager, returned from 12 months of leave to find she'd been effectively demoted. Her replacement was deemed "less risky" because she had older children. Angela quit within two months. Had her partner split the leave, neither parent would have been seen as the sole career risk. [5]
+
+**The financial case for dad taking leave:** If the birthing parent's employer offers a generous maternity top-up but no parental top-up, it often makes financial sense for the other parent to take the parental portion \u2014 especially if their employer offers a top-up. Use the calculator to compare both scenarios.
+
+**What to tell your employer:** "I'm taking my federally entitled parental leave for [X] weeks starting [date]. Here's my transition plan." As Workzoom puts it, everyone in a 150-person company knows how you treated the last person who went on leave. [6]`
+  },
+  {
+    id: "top-up-decoder",
+    title: "Decoding Your Employer's Top-Up: What to Look For",
+    tag: "Money", tagColor: "#8a6dbf", readTime: "4 min",
+    preview: "51% of Canadian employers define maternity and parental top-ups differently. Most employees don't know which they have.",
+    refs: [
+      { t: "Canada.ca \u2013 Supplementing Maternity, Parental, Compassionate Care or Family Caregiver Benefits", u: "https://www.canada.ca/en/employment-social-development/programs/ei/ei-list/ei-employers-maternity-parental-benefits.html" },
+      { t: "Benefits Canada \u2013 More Employers Topping Up Maternity Than Parental Leave (Survey)", u: "https://www.benefitscanada.com/benefits/absence-management/more-canadian-employers-topping-up-maternity-leave-than-parental-leave-survey/" },
+      { t: "Whitten & Lublin Employment Lawyers \u2013 Top-Up While on Maternity Leave: What Are the Rules?", u: "https://toronto-employmentlawyer.com/blog/employment-contracts/top-up-maternity-leave/" },
+      { t: "Workzoom \u2013 Parental Leave in Canada: What Employers Need to Know (2026)", u: "https://www.workzoom.com/blog/parental-leave-canada-2026-employer-guide/" },
+    ],
+    body: `An employer top-up is the single biggest variable in your parental leave finances \u2014 and most parents don't fully understand their policy until they're already on leave.
+
+**The basics:** A top-up brings your income closer to your normal salary. These are structured as Supplemental Unemployment Benefit (SUB) plans and don't reduce your EI, as long as the combined total doesn't exceed your pre-leave earnings. Your employer doesn't need to register the plan with Service Canada, but must keep records. [1]
+
+**The catch most people miss:** 51% of Canadian employers define maternity and parental top-ups as completely separate policies. You might get 93% during maternity but zero during parental leave. 93% of employers make maternity top-ups available to all eligible employees, but only 76% do the same for parental. Always ask HR for both policies in writing. [2]
+
+**Common structures by sector:**
+\u2022 Public sector: Often 93% for 17 weeks maternity. Union agreements may add weeks.
+\u2022 Big private employers (banks, consulting, tech): Typically 75\u2013100% for 17 weeks. Some offer dedicated paternity top-ups.
+\u2022 Universities: Generous \u2014 UBC tops up to 95% through their SEB program.
+\u2022 SMEs/startups: Most offer no formal top-up.
+
+**The return-to-work clause:** Nearly all top-up agreements require 6\u201312 months of return or you repay. The top-up cannot be used to reduce other benefits like sick leave or vacation. [3]
+
+**The cost to employers is lower than you think.** A 17-week top-up to 80% for an employee earning $70,000 costs roughly $7,000. The Society for Human Resource Management estimates the cost of hiring a replacement at 3\u20134x the position's salary when accounting for lost productivity and training. [4]
+
+**Questions to ask HR before your leave:**
+\u2022 Do you have separate top-up policies for maternity and parental leave?
+\u2022 What percentage and for how many weeks?
+\u2022 Is there a minimum tenure requirement? (49% of employers don't have one) [2]
+\u2022 What's the return-to-work commitment?
+\u2022 How does the top-up interact with my benefits premiums during leave?`
+  },
+  {
+    id: "self-employed-guide",
+    title: "Self-Employed and Expecting? Your Complete Parental Leave Playbook",
+    tag: "Self-Employed", tagColor: "#d4783e", readTime: "7 min",
+    preview: "Self-employed Canadians can access parental benefits \u2014 but the rules are very different, and timing is everything.",
+    refs: [
+      { t: "Canada.ca \u2013 Benefits for Self-Employed People", u: "https://www.canada.ca/en/services/benefits/ei/ei-self-employed-workers.html" },
+      { t: "Canada.ca \u2013 EI Special Benefits for Self-Employed People (Detailed Guide)", u: "https://www.canada.ca/en/employment-social-development/programs/ei/ei-list/reports/self-employed-special-benefits.html" },
+      { t: "CFIB \u2013 EI When You're Self-Employed", u: "https://www.cfib-fcei.ca/en/tools-resources/ei-when-youre-self-employed" },
+      { t: "Stark & Marsh \u2013 Self-Employment Insurance Analysis", u: "https://www.starkmarsh.com/self-employment-insurance/" },
+      { t: "QPIP \u2013 Features and Rates", u: "https://www.rqap.gouv.qc.ca/en/about-the-plan/general-information/features" },
+    ],
+    body: `If you're self-employed in Canada and planning to have a child, you can access EI maternity and parental benefits \u2014 but the rules are fundamentally different from employed workers. The 12-month planning window is critical. [1]
+
+**The 12-month opt-in rule.** You must register for EI Special Benefits at least 12 months before you can claim. If you discover you're pregnant today and haven't opted in, you won't qualify unless your due date is 12+ months away. Many self-employed parents opt in as soon as they start thinking about children. [2]
+
+**How benefits are calculated differently.** For employees, EI uses your "best weeks" of insurable earnings from the past year. For self-employed workers, benefits are based on your net self-employment earnings from the previous calendar year \u2014 not the last 52 weeks. If you incorporated recently or had a low-income year, your benefits could be much less than expected. [2]
+
+**The minimum earnings threshold.** For 2026 claims, you must have earned approximately $8,826 in net self-employment earnings in the prior calendar year. Below this, you won't qualify even if you've been paying premiums. [1]
+
+**The permanent commitment catch.** Once you receive EI benefits as a self-employed person, you cannot opt out. You must continue paying EI premiums on self-employment income for the rest of your self-employed career. If you never use benefits, you can opt out at any time. [3]
+
+**But the math often works out.** A full 50 weeks of maternity/parental benefits at the maximum amount covers approximately 30 years of premiums paid at the maximum amount. If you have multiple children, the benefits will more than cover a lifetime of premiums. [4]
+
+**You only pay the employee portion.** Unlike regular employees whose employers pay 1.4x their EI contribution, self-employed workers don't pay the employer share. Your annual premiums are 1.61% of net self-employment income up to the MIE of $68,900 \u2014 a maximum of ~$1,109/year. [3]
+
+**The Quebec exception.** If you live in Quebec, you're automatically covered for maternity and parental benefits through QPIP regardless of employment status. QPIP premiums are mandatory \u2014 no opt-in needed. The minimum insurable earnings are just $2,000 (far lower than federal EI's ~$8,826). Benefit rates are higher (70\u201375% vs 55%) and the MIE is $103,000 in 2026. Quebec self-employed residents can still opt into federal EI separately for sickness, compassionate care, and family caregiver benefits. [5]
+
+**Reporting income during your benefit period.** If you earn self-employment income while receiving benefits, you must report it. Transactions are allocated to the weeks when the work was performed, not when payment is received. For example, if a real estate agent closes a sale that was listed before leave, the commission is allocated to the pre-leave work period. [2]
+
+**Both self-employed and employed?** If you have both self-employment income and insurable employment from an employer, both may be combined to increase your benefit rate. This can meaningfully boost weekly benefits if neither source alone reaches the MIE. [1]
+
+**Action checklist for self-employed parents:**
+\u2022 Opt into EI special benefits at least 12 months before your expected claim date
+\u2022 Maximize net self-employment earnings in the calendar year before you claim
+\u2022 Consider whether the permanent premium commitment makes sense for your situation
+\u2022 If in Quebec, verify your QPIP coverage \u2014 you're likely already fully covered
+\u2022 Discuss timing and tax implications with your accountant`
+  },
+  {
+    id: "laid-off-on-leave",
+    title: "Lost Your Job During Parental Leave? Here's What You Need to Know",
+    tag: "Know Your Rights", tagColor: "#c05050", readTime: "5 min",
+    preview: "About 3,000 Canadian parents face this each year. A recent CBC investigation exposed a major gap in EI coverage.",
+    refs: [
+      { t: "CBC News \u2013 She lost her job after maternity leave. Now she's been denied EI (Jan 2026)", u: "https://www.cbc.ca/news/canada/montreal/quebec-mother-denied-ei-benefits-after-maternity-and-parental-leave-9.7053440" },
+      { t: "Open Canada \u2013 Access to EI Regular Benefits for Parents (Government briefing note)", u: "https://search.open.canada.ca/qpnotes/record/esdc-edsc,EWD_JUN2025_007" },
+      { t: "Monkhouse Law \u2013 Maternity Leave Ontario: Rights, Pay & Rules (2026)", u: "https://www.monkhouselaw.com/maternity-leave-ontario/" },
+    ],
+    body: `In January 2026, CBC News reported the story of Celia Johnston, a Quebec mother laid off a week before she was scheduled to return from leave. What shocked her most wasn't the job loss \u2014 it was being denied EI regular benefits afterward. [1]
+
+**The policy gap:** EI rules allow combining special benefits (maternity/parental) and regular benefits for up to 50 weeks in a 52-week benefit period. If you've used your full 50 weeks of maternity and parental benefits, there's no room left for regular EI after a layoff. Advocacy group Mouvement Action Ch\u00F4mage says they receive calls about this roughly once a week. [1]
+
+**This is a known systemic issue.** In 2022, the Social Security Tribunal ruled that EI provisions discriminate against women on the basis of sex and pregnancy, violating the Canadian Charter of Rights. Six women had been denied regular benefits after leave because they couldn't accumulate enough insurable hours during their benefit period. [2]
+
+**Your rights during leave:** Every province requires employers to protect your job. In Ontario's 2026 Brandt Tractor decision, the court upheld that even during a business sale, employees on maternity leave must be fairly considered for continued employment. A successor employer can still be liable for discrimination. [3]
+
+**What to do if this happens:**
+\u2022 File for EI regular benefits immediately \u2014 even if you expect denial. You have 30 days to appeal.
+\u2022 Check if your severance accounts for the top-up repayment clause \u2014 many employers waive it in layoff situations.
+\u2022 Contact your provincial employment standards office.
+\u2022 Review whether your employer continued benefits through the end of your leave as required by law.
+
+**Prevention tip:** Before going on leave, get your employer's commitment in writing \u2014 not just "your job is protected by law," but specifics about your role and what happens during a reorg. Keep 2\u20133 months of emergency savings beyond your EI and top-up income.`
+  },
+  {
+    id: "tax-planning",
+    title: "Tax Planning for Parental Leave: What Most Parents Miss",
+    tag: "Taxes", tagColor: "#3a7ca5", readTime: "5 min",
+    preview: "EI benefits are taxable income. Here's how to avoid a surprise tax bill and maximize your credits.",
+    refs: [
+      { t: "TaxTool.ca \u2013 Tax Planning for Maternity and Parental Leaves", u: "https://taxtool.ca/tax-planning-for-maternity-and-parental-leaves/" },
+      { t: "Canada.ca \u2013 Canada Child Benefit: How Much You Can Get", u: "https://www.canada.ca/en/revenue-agency/services/child-family-benefits/canada-child-benefit/how-much.html" },
+    ],
+    body: `Many new parents are shocked to discover their parental leave benefits are fully taxable. Here's what you need to plan for. [1]
+
+**EI benefits appear on a T4E slip.** Every dollar of EI maternity and parental benefits goes on your tax return as income. If you worked part of the year at full salary and collected EI for the rest, your combined income could push you into a higher marginal tax bracket than expected.
+
+**The CCB windfall.** The Canada Child Benefit is recalculated every July based on prior-year adjusted family net income. A leave year where your family income drops significantly could qualify you for substantially higher CCB payments. For a family with one child under 6 dropping from $120K to $80K combined income, the CCB increase could be $2,000+ annually. Maximum CCB is $7,997/yr per child under 6 for families with AFNI under $37,487. [2]
+
+**Childcare expense deduction.** Once you return to work and pay for childcare, the deduction (Line 21400) must be claimed by the lower-income spouse. During a leave year, income shifts may change who qualifies as the lower earner \u2014 plan accordingly. [1]
+
+**RRSP contribution room is unaffected.** Taking parental leave does not reduce your future RRSP contribution room, which is based on earned income from the prior year. Pre-leave RRSP deductions can reduce your taxable income for the year you were on leave.
+
+**GST/HST credit.** This income-tested benefit is calculated on family net income. A reduced-income leave year could increase your credit payments the following year. Combined with the CCB boost, these downstream benefits can partially offset the income reduction during leave. [1]
+
+**File your taxes even with zero income.** Both parents must file tax returns every year to continue receiving CCB payments. Even if you had no income during your leave year, file anyway \u2014 the CRA uses your return to calculate benefits. [2]
+
+**Tax tip for mixed-income leave years:** If you had a full salary for part of the year plus EI for the rest, consider whether your employer withheld enough tax on EI payments. Many parents owe a balance in April because EI tax withholding doesn't account for the full-salary months. Ask Service Canada to increase withholding on your EI payments if needed.`
+  },
+  {
+    id: "quebec-qpip",
+    title: "Quebec Parents: How QPIP Gives You a Better Deal",
+    tag: "Quebec", tagColor: "#3a5ca5", readTime: "5 min",
+    preview: "Higher replacement rates, no waiting period, self-employed coverage \u2014 but the plan choice is irreversible.",
+    refs: [
+      { t: "QPIP \u2013 Features and Rates", u: "https://www.rqap.gouv.qc.ca/en/about-the-plan/general-information/features" },
+      { t: "Workzoom \u2013 Parental Leave in Canada: What Employers Need to Know (2026)", u: "https://www.workzoom.com/blog/parental-leave-canada-2026-employer-guide/" },
+      { t: "QPIP \u2013 Benefits for a Pregnancy or a Birth (inc. plan comparison table)", u: "https://www.rqap.gouv.qc.ca/en/wage-earner/pregnancy-birth/benefits-pregnancy-birth-january-2021" },
+      { t: "QPIP \u2013 Choice of Benefit Plan", u: "https://www.rqap.gouv.qc.ca/en/wage-earner/choice-of-benefit-plan" },
+      { t: "Statistics Canada \u2013 Parental Leave, 1997 to 2022", u: "https://www150.statcan.gc.ca/n1/pub/14-28-0001/2023001/article/00009-eng.htm" },
+      { t: "CBC News \u2013 Mom denied EI after maternity and parental leave (Jan 2026)", u: "https://www.cbc.ca/news/canada/montreal/quebec-mother-denied-ei-benefits-after-maternity-and-parental-leave-9.7053440" },
+      { t: "CCPA \u2013 Support for Parents in a Post-Pandemic World", u: "https://www.policyalternatives.ca/news-research/support-for-parents-in-a-post-pandemic-world-options-for-enhancing-federal-maternity-and-parental-leave/" },
+    ],
+    body: `Quebec's Parental Insurance Plan (QPIP) is fundamentally different and more generous than federal EI for parental benefits. Here's everything Quebec parents need to know. [1]
+
+**Why QPIP is more generous:** No waiting period (federal EI has one, though currently waived). Higher replacement rates \u2014 up to 70-75% vs EI's 55%. Much higher maximum insurable earnings: $103,000 in 2026 vs $68,900 for federal EI. Self-employed workers are covered automatically. And the minimum qualifying earnings are just $2,000. [2]
+
+**Basic vs Special plan \u2014 the irreversible choice.** Under the basic plan: 18 weeks maternity at 70%, 5 weeks paternity at 70%, plus 28 shareable parental weeks (7 at 70%, then 21 at 55%). Under the special plan: 15 weeks maternity at 75%, 3 weeks paternity at 75%, and 25 shareable weeks all at 75%. The first parent to apply locks in the plan for both. You cannot change once the first benefit is paid. [3]
+
+**Which plan should you choose?** Basic pays more total money for most families because it has more weeks. Special pays a higher weekly rate but for fewer weeks \u2014 better if you need maximum weekly income and plan to return sooner. Use the QPIP benefit calculation simulator before applying. [4]
+
+**Paternity weeks are exclusive.** Fathers or non-birthing parents get 5 weeks at 70% (basic) or 3 weeks at 75% (special) that cannot be transferred. These are separate from shared parental weeks. This dedicated provision is why 85% of Quebec fathers take leave, vs 11% elsewhere in Canada. [5]
+
+**The sharing bonus.** When both parents each take at least 8 shareable parental weeks (basic plan), they unlock 4 additional parental weeks. For the special plan, each parent needs at least 6 shareable weeks to unlock 3 bonus weeks. [3]
+
+**Income during benefits.** During parental and paternity weeks, only income exceeding 25% of your gross benefits is deducted. During maternity weeks, every dollar of concurrent income is fully deducted \u2014 an important distinction if you do any work during leave. [1]
+
+**QPIP and federal EI interaction.** QPIP replaces federal EI for maternity, paternity, and parental benefits only. Quebec residents still access federal EI for sickness, compassionate care, and family caregiver benefits. Weeks of QPIP benefits count toward the maximum number of EI benefit weeks \u2014 so if you use 50 weeks of QPIP, you may have limited room for regular EI if laid off afterward. This is the gap that affected Celia Johnston in January 2026. [6]
+
+**The real-world advantage.** The CCPA estimates that Quebec parents receive up to $1,319/week under the basic plan \u2014 nearly double the $729/week maximum under federal EI. For higher earners, this difference is substantial: a parent earning $100,000 gets ~$1,346/wk from QPIP basic maternity vs $729/wk from federal EI \u2014 a difference of over $600 per week. [7]`
+  },
+];
+
+// ─── MAIN APP ────────────────────────────────────────────────────────────────
+function App() {
+  const [page, setPage] = useState("calc");
+  const [article, setArticle] = useState(null);
+  const [mobileNav, setMobileNav] = useState(false);
+
+  // Calculator state
+  const [type, setType] = useState("standard");
+  const [qPlan, setQPlan] = useState("basic");
+  const [bp, setBP] = useState({ sal: 75000, prov: PROVS[0], hasMT: false, mtP: 0, mtW: 0, hasPT: false, ptP: 0, ptW: 0, tenure: "2+", selfEmp: false });
+  const [op, setOP] = useState({ sal: 85000, prov: PROVS[0], hasT: false, tP: 0, tW: 0, tenure: "2+", selfEmp: false });
+  const isQ = bp.prov.q || op.prov.q;
+  const mxPP = type === "standard" ? EI.stdMax1 : EI.extMax1;
+  const totP = type === "standard" ? EI.stdTotal : EI.extTotal;
+  const [bpPW, setBpPW] = useState(30);
+  const [opPW, setOpPW] = useState(10);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  useEffect(() => { setBpPW(type === "standard" ? 30 : 50); setOpPW(type === "standard" ? 10 : 19); }, [type]);
+  useEffect(() => { if (!isQ && bpPW + opPW > totP) setOpPW(Math.max(0, totP - bpPW)); }, [bpPW, isQ, totP]);
+  // Clamp parental weeks when switching to QPIP (lower parental pool)
+  useEffect(() => {
+    if (isQ) {
+      const qMax = qPlan === "basic" ? 28 : 25;
+      if (bpPW > qMax) setBpPW(qMax);
+      if (opPW > qMax - Math.min(bpPW, qMax)) setOpPW(Math.max(0, qMax - Math.min(bpPW, qMax)));
+    }
+  }, [isQ, qPlan]);
+
+  const result = useMemo(() => calc(bp, op, type, qPlan, bpPW, opPW), [bp, op, type, qPlan, bpPW, opPW]);
+  const recs = useMemo(() => getRecs(bp, op, type, isQ, result, bpPW, opPW), [bp, op, type, isQ, result, bpPW, opPW]);
+  const avgWk = result.fam / Math.max(result.bp.wks.length, result.op.wks.length, 1);
+
+  const scrollTo = id => { document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }); };
+
+  // Blog article view
+  if (article) {
+    const a = ARTICLES.find(x => x.id === article);
+    return (
+      <Shell page="blog" setPage={p => { setArticle(null); setPage(p); }} mobileNav={mobileNav} setMobileNav={setMobileNav}>
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: "40px 20px 80px" }}>
+          <button onClick={() => setArticle(null)} style={{ background: "none", border: "none", color: "#c27840", fontSize: 14, cursor: "pointer", marginBottom: 20, fontFamily: "inherit", fontWeight: 600 }}>{"\u2190"} Back to all articles</button>
+          <span style={S.badge(a.tagColor)}>{a.tag}</span>
+          <h1 style={{ fontFamily: "var(--fd)", fontSize: "clamp(26px, 4vw, 36px)", lineHeight: 1.2, margin: "12px 0 8px", color: "#2d2520" }}>{a.title}</h1>
+          <p style={{ fontSize: 13, color: "#a0937f", marginBottom: 32 }}>{a.readTime} read</p>
+          <div style={{ fontSize: 15, lineHeight: 1.85, color: "#4a3f35" }}>
+            {a.body.split("\n\n").map((para, i) => {
+              if (para.startsWith("\u2022")) return <ul key={i} style={{ paddingLeft: 20, margin: "12px 0" }}>{para.split("\n").filter(l => l.trim()).map((li, j) => <li key={j} style={{ marginBottom: 6 }}>{li.replace(/^\u2022\s*/, "")}</li>)}</ul>;
+              // Parse [n] footnote refs and **bold**
+              const tokens = para.split(/(\[\d+\]|\*\*.*?\*\*)/g);
+              return <p key={i} style={{ marginBottom: 16 }}>{tokens.map((tk, j) => {
+                const fnMatch = tk.match(/^\[(\d+)\]$/);
+                if (fnMatch && a.refs) {
+                  const idx = parseInt(fnMatch[1]) - 1;
+                  const ref = a.refs[idx];
+                  return ref ? <a key={j} href={ref.u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, verticalAlign: "super", color: "#c27840", textDecoration: "none", fontWeight: 700, cursor: "pointer" }} title={ref.t}>[{fnMatch[1]}]</a> : <sup key={j} style={{ color: "#c27840" }}>[{fnMatch[1]}]</sup>;
+                }
+                if (tk.startsWith("**")) return <strong key={j} style={{ color: "#2d2520" }}>{tk.replace(/\*\*/g, "")}</strong>;
+                return tk;
+              })}</p>;
+            })}
+          </div>
+          {/* Footnotes */}
+          {a.refs && a.refs.length > 0 && (
+            <div style={{ marginTop: 32, paddingTop: 20, borderTop: "1px solid #e6dfd6" }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, color: "#9a8d80", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Sources</h4>
+              <ol style={{ paddingLeft: 20, margin: 0 }}>
+                {a.refs.map((ref, ri) => (
+                  <li key={ri} style={{ fontSize: 12, color: "#7a6e62", lineHeight: 1.5, marginBottom: 4 }}>
+                    <a href={ref.u} target="_blank" rel="noopener noreferrer" style={{ color: "#7a6e62", textDecoration: "underline" }}>{ref.t}</a>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          <div style={{ marginTop: 40, padding: "20px 24px", background: "#f5ede3", borderRadius: 14, textAlign: "center" }}>
+            <p style={{ fontSize: 15, color: "#5c4f44", marginBottom: 12 }}>Ready to see how this applies to your family?</p>
+            <button onClick={() => { setArticle(null); setPage("calc"); }} style={{ background: "#c27840", color: "#fff", border: "none", padding: "12px 28px", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "var(--fd)" }}>Open the Calculator {"\u2192"}</button>
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell page={page} setPage={setPage} mobileNav={mobileNav} setMobileNav={setMobileNav}>
+      {page === "calc" && (
+        <>
+          {/* Hero */}
+          <div style={{ background: "linear-gradient(175deg, #2d2520 0%, #46372e 60%, #5e473a 100%)", color: "#fff", padding: "52px 24px 48px", textAlign: "center", position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at 20% 30%, #c2784010 0%, transparent 50%)" }} />
+            <div style={{ position: "relative", maxWidth: 640, margin: "0 auto" }}>
+              <div style={{ fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: "#c9a87c", marginBottom: 10, fontWeight: 600 }}>Canada {"\u00B7"} 2026 Rules {"\u00B7"} EI & QPIP</div>
+              <h1 style={{ fontFamily: "var(--fd)", fontSize: "clamp(26px, 5vw, 42px)", lineHeight: 1.15, marginBottom: 14, fontWeight: 400 }}>Plan Your Parental Leave,<br />Maximize Your Family's Income</h1>
+              <p style={{ fontSize: 15, lineHeight: 1.6, color: "#c9b8a4", maxWidth: 500, margin: "0 auto 20px" }}>Answer a few questions about your family's situation and we'll show you exactly how to split your leave for the best financial outcome.</p>
+              <button onClick={() => scrollTo("calculator")} style={{ background: "#c27840", color: "#fff", border: "none", padding: "14px 32px", borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: "pointer", fontFamily: "var(--fd)", boxShadow: "0 4px 20px #c2784040" }}>Start Planning {"\u2192"}</button>
+            </div>
+          </div>
+
+          {/* Social proof bar */}
+          <div style={{ background: "#f0e9df", padding: "14px 20px", textAlign: "center", fontSize: 13, color: "#7a6e62", borderBottom: "1px solid #e0d8cc" }}>
+            Based on 2026 federal EI rules ($729/wk max standard, $437/wk max extended) and Quebec QPIP ($103K insurable earnings)
+          </div>
+
+          <main id="calculator" style={{ maxWidth: 860, margin: "0 auto", padding: "36px 20px 60px" }}>
+
+            {/* ── STEP 1: Leave Type ── */}
+            <section style={{ marginBottom: 36 }}>
+              <StepHeader n={1} title="What type of leave are you planning?" />
+              <p style={{ fontSize: 14, color: "#7a6e62", marginBottom: 16, lineHeight: 1.6 }}>
+                This is the biggest decision. Standard leave gives you ~12 months with higher weekly income. Extended spreads ~18 months at a lower weekly rate. The total payout is roughly the same {"\u2014"} it's about cash flow vs. time at home.
+              </p>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                {[{ k: "standard", l: "Standard (12 months)", s: "55% of earnings \u00B7 up to $729/week", d: "Higher weekly income, shorter leave" },
+                  { k: "extended", l: "Extended (18 months)", s: "33% of earnings \u00B7 up to $437/week", d: "More time at home, lower weekly income" }
+                ].map(o => (
+                  <button key={o.k} onClick={() => setType(o.k)} style={{
+                    flex: 1, minWidth: 240, padding: "18px 22px", background: type === o.k ? "#fdf6f0" : "#fff",
+                    border: type === o.k ? "2px solid #c27840" : "1px solid #e0d8cc", borderRadius: 14, cursor: "pointer", textAlign: "left",
+                    transition: "all 0.15s", boxShadow: type === o.k ? "0 2px 12px #c2784015" : "none",
+                  }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "var(--fd)", color: "#2d2520" }}>{o.l}</div>
+                    <div style={{ fontSize: 12, color: "#c27840", fontWeight: 600, marginTop: 2 }}>{o.s}</div>
+                    <div style={{ fontSize: 12, color: "#8a7d6e", marginTop: 6 }}>{o.d}</div>
+                  </button>
+                ))}
+              </div>
+              {isQ && (
+                <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
+                  {[{ k: "basic", l: "QPIP Basic", s: "More weeks \u00B7 70%\u219255%" }, { k: "special", l: "QPIP Special", s: "Fewer weeks \u00B7 75%" }].map(o => (
+                    <button key={o.k} onClick={() => setQPlan(o.k)} style={{ flex: 1, padding: "12px 16px", background: qPlan === o.k ? "#eef5f0" : "#fff", border: qPlan === o.k ? "2px solid #5a8f6e" : "1px solid #e0d8cc", borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "var(--fd)" }}>{o.l}</div>
+                      <div style={{ fontSize: 11, color: "#7a6e62" }}>{o.s}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* ── STEP 2: Basic Info ── */}
+            <section style={{ marginBottom: 36 }}>
+              <StepHeader n={2} title="Tell us about each parent" />
+              <p style={{ fontSize: 14, color: "#7a6e62", marginBottom: 16, lineHeight: 1.6 }}>
+                EI pays a percentage of your salary, so the higher earner loses more absolute dollars on leave. This is why splitting leave strategically matters.
+              </p>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                {/* Birthing Parent */}
+                <div style={{ ...S.card, flex: 1, minWidth: 280, borderLeft: "4px solid #c27840" }}>
+                  <h3 style={{ fontFamily: "var(--fd)", fontSize: 17, margin: "0 0 16px", color: "#2d2520" }}>{"\uD83E\uDD30"} Birthing Parent</h3>
+                  <Slider val={bp.sal} set={v => setBP({ ...bp, sal: v })} min={0} max={250000} step={1000} label="Annual salary" accent="#c27840" suffix="$" />
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={S.label}>Province of work <Tip>Your province determines job-protection rules (how many weeks your employer must hold your job). EI benefit amounts are federal and the same everywhere except Quebec.</Tip></label>
+                    <select value={bp.prov.c} onChange={e => setBP({ ...bp, prov: PROVS.find(p => p.c === e.target.value) })} style={S.select}>
+                      {PROVS.map(p => <option key={p.c} value={p.c}>{p.n}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {/* Other Parent */}
+                <div style={{ ...S.card, flex: 1, minWidth: 280, borderLeft: "4px solid #5a8f6e" }}>
+                  <h3 style={{ fontFamily: "var(--fd)", fontSize: 17, margin: "0 0 16px", color: "#2d2520" }}>{"\uD83D\uDC76"} Other Parent</h3>
+                  <Slider val={op.sal} set={v => setOP({ ...op, sal: v })} min={0} max={250000} step={1000} label="Annual salary" accent="#5a8f6e" suffix="$" />
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={S.label}>Province of work</label>
+                    <select value={op.prov.c} onChange={e => setOP({ ...op, prov: PROVS.find(p => p.c === e.target.value) })} style={S.select}>
+                      {PROVS.map(p => <option key={p.c} value={p.c}>{p.n}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* ── STEP 3: Week Split ── */}
+            <section style={{ marginBottom: 36 }}>
+              <StepHeader n={3} title="How do you want to split the time?" />
+              <div style={{ ...S.card, background: "linear-gradient(135deg, #fdf7f1 0%, #fefbf8 100%)", border: "2px solid #e8c9a8" }}>
+                <p style={{ fontSize: 13, color: "#6b5e52", lineHeight: 1.6, marginBottom: 14 }}>
+                  {!isQ ? <>
+                    Maternity leave (15 weeks, 55% rate) is automatic for the birthing parent. The remaining <strong>{totP} parental weeks</strong> are yours to split. Neither parent can take more than {mxPP} weeks. <strong>When both parents take at least some leave, you unlock {type === "standard" ? 5 : 8} bonus weeks</strong> {"\u2014"} use it or lose it.
+                  </> : <>
+                    Under QPIP, maternity ({qPlan === "basic" ? "18" : "15"} wks) and paternity ({qPlan === "basic" ? "5" : "3"} wks) are exclusive. The <strong>{qPlan === "basic" ? "28" : "25"} shareable parental weeks</strong> below can be split between parents. Sharing unlocks {qPlan === "basic" ? "4" : "3"} bonus weeks.
+                  </>}
+                </p>
+                {!isQ ? <>
+                  <Slider val={bpPW} set={v => { const c = Math.min(v, mxPP); setBpPW(c); if (c + opPW > totP) setOpPW(totP - c); }} min={0} max={mxPP} label="Birthing parent's parental weeks" accent="#c27840" suffix="w" />
+                  <Slider val={opPW} set={v => setOpPW(Math.min(v, mxPP, totP - bpPW))} min={0} max={Math.min(mxPP, totP - bpPW)} label="Other parent's parental weeks" accent="#5a8f6e" suffix="w" />
+                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, fontSize: 12, padding: "10px 14px", background: "#f0e9df", borderRadius: 10, color: "#6b5e52" }}>
+                    <span>Used: <strong>{bpPW + opPW}</strong> of {totP}</span>
+                    <span>Unused: <strong>{totP - bpPW - opPW}</strong></span>
+                    {bpPW > 0 && opPW > 0 && <span style={{ color: "#4a7f5e", fontWeight: 700 }}>{"\u2713"} Sharing bonus unlocked (+{type === "standard" ? 5 : 8} wks)</span>}
+                  </div>
+                </> : <>
+                  <Slider val={bpPW} set={v => { const qMax = qPlan === "basic" ? 28 : 25; const c = Math.min(v, qMax); setBpPW(c); if (c + opPW > qMax) setOpPW(qMax - c); }} min={0} max={qPlan === "basic" ? 28 : 25} label="Birthing parent's parental weeks" accent="#c27840" suffix="w" />
+                  <Slider val={opPW} set={v => { const qMax = qPlan === "basic" ? 28 : 25; setOpPW(Math.min(v, qMax - bpPW)); }} min={0} max={(qPlan === "basic" ? 28 : 25) - bpPW} label="Other parent's parental weeks" accent="#5a8f6e" suffix="w" />
+                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, fontSize: 12, padding: "10px 14px", background: "#eef5f0", borderRadius: 10, color: "#4a6b55" }}>
+                    <span>Used: <strong>{bpPW + opPW}</strong> of {qPlan === "basic" ? 28 : 25}</span>
+                    {bpPW > 0 && opPW > 0 && <span style={{ fontWeight: 700 }}>{"\u2713"} Sharing bonus unlocked (+{qPlan === "basic" ? 4 : 3} wks)</span>}
+                  </div>
+                </>}
+              </div>
+            </section>
+
+            {/* ── STEP 4: Employer Top-ups (collapsible) ── */}
+            <section style={{ marginBottom: 36 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                <StepHeader n={4} title="Does either employer offer a top-up?" />
+              </div>
+              <p style={{ fontSize: 14, color: "#7a6e62", marginBottom: 12, lineHeight: 1.6 }}>
+                A top-up is when your employer pays extra on top of EI to bring your income closer to your normal salary. This is the #1 variable that changes the math on who should take more leave. <em>Don't have a top-up? Skip ahead to your results.</em>
+              </p>
+              <button onClick={() => setShowAdvanced(!showAdvanced)} style={{
+                background: showAdvanced ? "#2d2520" : "#fff", color: showAdvanced ? "#fff" : "#2d2520",
+                border: "1px solid #2d2520", borderRadius: 10, padding: "10px 20px", cursor: "pointer",
+                fontSize: 14, fontWeight: 600, fontFamily: "inherit", marginBottom: showAdvanced ? 16 : 0,
+              }}>
+                {showAdvanced ? "Hide top-up & advanced options \u25B4" : "Yes, add employer top-ups & advanced options \u25BE"}
+              </button>
+
+              {showAdvanced && (
+                <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
+                  <div style={{ ...S.card, flex: 1, minWidth: 280, borderLeft: "4px solid #c27840" }}>
+                    <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 12px" }}>{"\uD83E\uDD30"} Birthing Parent Top-Ups</h4>
+                    <p style={{ ...S.hint, marginBottom: 12 }}>51% of employers define these separately {"\u2014"} check your benefits package for each.</p>
+                    <TopUpPicker label={"\uD83C\uDFE5 Maternity leave top-up"} hasTopUp={bp.hasMT} pct={bp.mtP} weeks={bp.mtW} onChange={(h, p, w) => setBP({ ...bp, hasMT: h, mtP: p, mtW: w })} />
+                    <TopUpPicker label={"\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67 Parental leave top-up"} hasTopUp={bp.hasPT} pct={bp.ptP} weeks={bp.ptW} onChange={(h, p, w) => setBP({ ...bp, hasPT: h, ptP: p, ptW: w })} />
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={S.label}>Tenure <Tip>Some employers require a minimum service period (often 13 weeks {"\u2013"} 1 year) before you qualify for a top-up.</Tip></label>
+                      <select value={bp.tenure} onChange={e => setBP({ ...bp, tenure: e.target.value })} style={S.select}>
+                        <option value="<13wk">Less than 13 weeks</option><option value="13wk-1y">13 weeks {"\u2013"} 1 year</option>
+                        <option value="1-2y">1 {"\u2013"} 2 years</option><option value="2+">2+ years</option>
+                      </select>
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#7a6e62", cursor: "pointer" }}>
+                      <input type="checkbox" checked={bp.selfEmp} onChange={e => setBP({ ...bp, selfEmp: e.target.checked })} style={{ accentColor: "#c27840" }} />
+                      Self-employed <Tip>You must opt into EI special benefits at least 12 months before claiming. QPIP covers self-employed automatically with $2,000+ earnings.</Tip>
+                    </label>
+                  </div>
+                  <div style={{ ...S.card, flex: 1, minWidth: 280, borderLeft: "4px solid #5a8f6e" }}>
+                    <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 12px" }}>{"\uD83D\uDC76"} Other Parent Top-Up</h4>
+                    <TopUpPicker label="Parental leave top-up" hasTopUp={op.hasT} pct={op.tP} weeks={op.tW} onChange={(h, p, w) => setOP({ ...op, hasT: h, tP: p, tW: w })} />
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={S.label}>Tenure</label>
+                      <select value={op.tenure} onChange={e => setOP({ ...op, tenure: e.target.value })} style={S.select}>
+                        <option value="<13wk">Less than 13 weeks</option><option value="13wk-1y">13 weeks {"\u2013"} 1 year</option>
+                        <option value="1-2y">1 {"\u2013"} 2 years</option><option value="2+">2+ years</option>
+                      </select>
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#7a6e62", cursor: "pointer" }}>
+                      <input type="checkbox" checked={op.selfEmp} onChange={e => setOP({ ...op, selfEmp: e.target.checked })} style={{ accentColor: "#5a8f6e" }} />
+                      Self-employed
+                    </label>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* ── RESULTS ── */}
+            <section id="results">
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+                <div style={{ width: 30, height: 30, borderRadius: "50%", background: "#5a8f6e", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: 800 }}>{"\u2713"}</div>
+                <h2 style={{ fontFamily: "var(--fd)", fontSize: 22, margin: 0 }}>Your Family's Leave Plan</h2>
+              </div>
+
+              {result.warn.length > 0 && <div style={{ background: "#fef3cd", border: "1px solid #f0d070", borderRadius: 12, padding: "10px 16px", marginBottom: 16, fontSize: 13, color: "#856404" }}>{result.warn.map((w, i) => <div key={i}>{"\u26A0"} {w}</div>)}</div>}
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 6, background: "#fff", borderRadius: 16, border: "1px solid #e6dfd6", padding: 8, marginBottom: 20 }}>
+                <Stat label="Family Total" val={fmt(result.fam)} sub="during leave" />
+                <Stat label="Income Gap" val={fmt(result.gap)} sub="vs. working" color="#c05050" />
+                <Stat label="Avg Weekly" val={fmt(avgWk)} sub="family" color="#5a8f6e" />
+                <Stat label="Birthing Off" val={`${result.bp.wks.length}wk`} sub={`\u2248${Math.round(result.bp.wks.length / 4.33)}mo`} color="#c27840" />
+                <Stat label="Other Off" val={`${result.op.wks.length}wk`} sub={`\u2248${Math.round(result.op.wks.length / 4.33)}mo`} color="#5a8f6e" />
+              </div>
+
+              {/* PERSONALIZED RECOMMENDATIONS */}
+              {recs.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <h3 style={{ fontFamily: "var(--fd)", fontSize: 17, marginBottom: 12 }}>{"\uD83C\uDFAF"} Personalized Recommendations</h3>
+                  {recs.map((rec, i) => <RecCard key={i} rec={rec} />)}
+                </div>
+              )}
+
+              <div style={S.card}><h3 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 12px" }}>Weekly Income Timeline</h3><Timeline r={result} /></div>
+
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
+                {[
+                  { who: "\uD83E\uDD30 Birthing Parent", d: result.bp, c: "#c27840", wks: result.bp.wks },
+                  { who: "\uD83D\uDC76 Other Parent", d: result.op, c: "#5a8f6e", wks: result.op.wks },
+                ].map((x, i) => {
+                  const matW = x.wks.filter(w => w.t.startsWith("Mat")), parW = x.wks.filter(w => !w.t.startsWith("Mat"));
+                  return (
+                    <div key={i} style={{ ...S.card, flex: 1, minWidth: 260 }}>
+                      <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 10px" }}>{x.who}</h4>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "6px 8px", fontSize: 13, color: "#6b5e52" }}>
+                        {matW.length > 0 && <><div style={{ gridColumn: "1/-1", fontSize: 11, fontWeight: 700, color: "#9a8d80", textTransform: "uppercase", letterSpacing: "0.05em" }}>Maternity ({matW.length}wk)</div>
+                          <div style={{ paddingLeft: 6 }}>Benefits</div><div style={{ textAlign: "right", fontWeight: 700 }}>{fmt(matW.reduce((s, w) => s + w.b, 0))}</div>
+                          <div style={{ paddingLeft: 6 }}>Top-up</div><div style={{ textAlign: "right", fontWeight: 700, color: x.c }}>{fmt(matW.reduce((s, w) => s + w.tu, 0))}</div>
+                        </>}
+                        {parW.length > 0 && <><div style={{ gridColumn: "1/-1", fontSize: 11, fontWeight: 700, color: "#9a8d80", textTransform: "uppercase", letterSpacing: "0.05em", marginTop: matW.length ? 4 : 0 }}>Parental ({parW.length}wk)</div>
+                          <div style={{ paddingLeft: 6 }}>Benefits</div><div style={{ textAlign: "right", fontWeight: 700 }}>{fmt(parW.reduce((s, w) => s + w.b, 0))}</div>
+                          <div style={{ paddingLeft: 6 }}>Top-up</div><div style={{ textAlign: "right", fontWeight: 700, color: x.c }}>{fmt(parW.reduce((s, w) => s + w.tu, 0))}</div>
+                        </>}
+                        <div style={{ borderTop: "1px solid #e6dfd6", paddingTop: 6, fontWeight: 700, marginTop: 4 }}>Total</div>
+                        <div style={{ borderTop: "1px solid #e6dfd6", paddingTop: 6, textAlign: "right", fontWeight: 800, fontSize: 16, color: "#2d2520", marginTop: 4 }}>{fmt(x.d.tot)}</div>
+                        <div>Avg/week</div><div style={{ textAlign: "right", fontWeight: 600 }}>{fmt(x.d.tot / Math.max(x.wks.length, 1))}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Key considerations */}
+              <div style={{ ...S.card, background: "linear-gradient(135deg, #fdf7f1 0%, #fefbf8 100%)", border: "2px solid #e8c9a8" }}>
+                <h3 style={{ fontFamily: "var(--fd)", fontSize: 16, margin: "0 0 12px" }}>{"\uD83D\uDCA1"} Things to keep in mind</h3>
+                <div style={{ fontSize: 13, lineHeight: 1.7, color: "#5c4f44" }}>
+                  <p style={{ marginBottom: 10 }}><strong>Tax:</strong> EI/QPIP benefits are taxable (<a href={REFS.tax_plan.u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#a0937f" }}>TaxTool.ca</a>). Reduced income may boost your Canada Child Benefit the following July (<a href={REFS.ccb.u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#a0937f" }}>Canada.ca CCB</a>).</p>
+                  <p style={{ marginBottom: 10 }}><strong>Job protection:</strong> In {bp.prov.n}, your employer must hold your job for {bp.prov.mJP} wks (maternity) + {bp.prov.pJP} wks (parental) and continue group benefits (<a href={bp.prov.c === "ON" ? REFS.on_esa.u : REFS.workzoom.u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#a0937f" }}>{bp.prov.c === "ON" ? "Ontario ESA" : "Provincial employment standards"}</a>).</p>
+                  <p style={{ marginBottom: 10 }}><strong>Top-up clawback:</strong> Most employers require 6{"\u2013"}12 months of return-to-work or you repay. EI + top-up cannot exceed pre-leave earnings (<a href={REFS.topup_rules.u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#a0937f" }}>Whitten & Lublin</a>).</p>
+                  {bpPW > 0 && opPW > 0 && <p style={{ marginBottom: 10 }}><strong>Sharing bonus:</strong> You've unlocked {isQ ? (qPlan === "basic" ? "4" : "3") : (type === "standard" ? "5" : "8")} extra weeks because both parents are taking leave{!isQ && <> (<a href={REFS.ei_digest.u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#a0937f" }}>Canada.ca Digest</a>)</>}. These are use-it-or-lose-it.</p>}
+                  {(bp.selfEmp || op.selfEmp) && <p style={{ marginBottom: 10 }}><strong>Self-employed:</strong> {isQ ? <>QPIP covers self-employed automatically with $2,000+ earnings (<a href={REFS.qpip.u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#a0937f" }}>QPIP</a>).</> : <>Must opt into EI special benefits 12+ months before claiming. Need $8,826+ in prior-year net earnings. Benefits based on prior calendar year. Once you receive benefits, opt-out is not possible (<a href={REFS.ei_self.u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#a0937f" }}>Canada.ca</a>; <a href={REFS.cfib.u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#a0937f" }}>CFIB</a>). A full 50 weeks of benefits covers ~30 years of premiums.</>}</p>}
+                </div>
+              </div>
+
+              {/* ── NEXT STEPS: Contextual partner recommendations ── */}
+              <div style={{ marginTop: 24, marginBottom: 20 }}>
+                <h3 style={{ fontFamily: "var(--fd)", fontSize: 17, marginBottom: 6 }}>{"\uD83D\uDCCB"} Your Next Steps</h3>
+                <p style={{ fontSize: 12, color: "#a0937f", marginBottom: 14 }}>Based on your results, here are actions to consider. <em>Some links below are from partners who help keep SmartLeave free.</em></p>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+
+                  {/* Life Insurance — always show for new parents */}
+                  <div style={{ background: "#fff", border: "1px solid #e6dfd6", borderRadius: 14, padding: "18px 20px", position: "relative" }}>
+                    <span style={{ position: "absolute", top: 12, right: 14, fontSize: 9, color: "#b8ad9e", textTransform: "uppercase", letterSpacing: "0.08em" }}>Partner</span>
+                    <div style={{ fontSize: 20, marginBottom: 6 }}>{"\uD83D\uDEE1\uFE0F"}</div>
+                    <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 6px", color: "#2d2520" }}>Get life insurance before baby arrives</h4>
+                    <p style={{ fontSize: 12, lineHeight: 1.5, color: "#6b5e52", marginBottom: 10 }}>
+                      Having a baby is the #1 reason Canadians get life insurance. Your calculator shows a family income gap of {fmt(result.gap)} during leave {"\u2014"} if something happened to either parent during this vulnerable period, the financial impact would be severe. Most new parents need 10-12x their annual income in coverage.
+                    </p>
+                    <a href="https://www.policyme.com" target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "8px 16px", background: "#2d2520", color: "#fff", borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: "none" }}>Get a free quote from PolicyMe {"\u2192"}</a>
+                    <p style={{ fontSize: 10, color: "#b8ad9e", marginTop: 6 }}>20-min online application. No medical exam for most. Backed by Securian Canada (A+ rated).</p>
+                  </div>
+
+                  {/* RESP — always show */}
+                  <div style={{ background: "#fff", border: "1px solid #e6dfd6", borderRadius: 14, padding: "18px 20px", position: "relative" }}>
+                    <span style={{ position: "absolute", top: 12, right: 14, fontSize: 9, color: "#b8ad9e", textTransform: "uppercase", letterSpacing: "0.08em" }}>Partner</span>
+                    <div style={{ fontSize: 20, marginBottom: 6 }}>{"\uD83C\uDF93"}</div>
+                    <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 6px", color: "#2d2520" }}>Open an RESP on day one</h4>
+                    <p style={{ fontSize: 12, lineHeight: 1.5, color: "#6b5e52", marginBottom: 10 }}>
+                      The federal CESG grant matches 20% of your contributions {"\u2014"} up to $500/year and $7,200 lifetime per child. Starting at birth means 18 years of compounding. Even $50/month from day one grows to ~$25,000 by age 18 (with grants + growth).
+                    </p>
+                    <a href="https://www.wealthsimple.com/en-ca/resp" target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "8px 16px", background: "#2d2520", color: "#fff", borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: "none" }}>Open an RESP with Wealthsimple {"\u2192"}</a>
+                    <p style={{ fontSize: 10, color: "#b8ad9e", marginTop: 6 }}>No minimum. Self-directed or managed. Automatic CESG applications.</p>
+                  </div>
+
+                  {/* Savings buffer — show when income gap is large */}
+                  {result.gap > 15000 && (
+                    <div style={{ background: "#fff", border: "1px solid #e6dfd6", borderRadius: 14, padding: "18px 20px", position: "relative" }}>
+                      <span style={{ position: "absolute", top: 12, right: 14, fontSize: 9, color: "#b8ad9e", textTransform: "uppercase", letterSpacing: "0.08em" }}>Partner</span>
+                      <div style={{ fontSize: 20, marginBottom: 6 }}>{"\uD83D\uDCB0"}</div>
+                      <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 6px", color: "#2d2520" }}>Build your leave savings buffer</h4>
+                      <p style={{ fontSize: 12, lineHeight: 1.5, color: "#6b5e52", marginBottom: 10 }}>
+                        Your family faces a {fmt(result.gap)} income gap during leave. Start building a buffer now in a high-interest savings account {"\u2014"} Wealthsimple offers a competitive rate with no minimum balance and instant access to your money.
+                      </p>
+                      <a href="https://www.wealthsimple.com/en-ca/save" target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "8px 16px", background: "#2d2520", color: "#fff", borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: "none" }}>Open a savings account {"\u2192"}</a>
+                      <p style={{ fontSize: 10, color: "#b8ad9e", marginTop: 6 }}>CDIC protected up to $1M. No fees. Instant transfers.</p>
+                    </div>
+                  )}
+
+                  {/* Will/estate — always show */}
+                  <div style={{ background: "#fff", border: "1px solid #e6dfd6", borderRadius: 14, padding: "18px 20px" }}>
+                    <div style={{ fontSize: 20, marginBottom: 6 }}>{"\uD83D\uDCDD"}</div>
+                    <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 6px", color: "#2d2520" }}>Create or update your will</h4>
+                    <p style={{ fontSize: 12, lineHeight: 1.5, color: "#6b5e52", marginBottom: 10 }}>
+                      Before baby arrives, make sure you have a will that names a guardian for your child, current beneficiary designations on your RRSP/TFSA/insurance, and powers of attorney. Many parents overlook this.
+                    </p>
+                    <p style={{ fontSize: 11, color: "#7a6e62" }}>Search "online will Canada" {"\u2014"} services like Willful and Epilogue offer plans from $99.</p>
+                  </div>
+
+                  {/* Return to work / career — always show */}
+                  <div style={{ background: "linear-gradient(135deg, #f0f7f3, #f8fcf9)", border: "1px solid #c8ddd0", borderRadius: 14, padding: "18px 20px" }}>
+                    <div style={{ fontSize: 20, marginBottom: 6 }}>{"\uD83D\uDE80"}</div>
+                    <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 6px", color: "#2d2520" }}>Plan your return to work</h4>
+                    <p style={{ fontSize: 12, lineHeight: 1.5, color: "#6b5e52", marginBottom: 10 }}>
+                      Returning from parental leave is one of the biggest career transitions you'll face. Whether you're going back to the same role, negotiating flexibility, or exploring new opportunities {"\u2014"} having a plan makes the difference.
+                    </p>
+                    <a href="https://joinclearcareer.com" target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "8px 16px", background: "#5a8f6e", color: "#fff", borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: "none" }}>Get career coaching with ClearCareer {"\u2192"}</a>
+                    <p style={{ fontSize: 10, color: "#7a9a84", marginTop: 6 }}>1-on-1 coaching for parents returning to work. Resume refresh, interview prep, and job search strategy.</p>
+                  </div>
+
+                  {/* PDF Report upsell */}
+                  <div style={{ background: "linear-gradient(135deg, #fdf7f1, #fefbf8)", border: "2px solid #e8c9a8", borderRadius: 14, padding: "18px 20px" }}>
+                    <div style={{ fontSize: 20, marginBottom: 6 }}>{"\uD83D\uDCCA"}</div>
+                    <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 6px", color: "#2d2520" }}>Download your personalized leave plan</h4>
+                    <p style={{ fontSize: 12, lineHeight: 1.5, color: "#6b5e52", marginBottom: 10 }}>
+                      Get a detailed PDF with your week-by-week income projections, action item checklist (EI application deadlines, CCB filing, RESP setup), tax planning notes, and a return-to-work timeline {"\u2014"} all based on the numbers you entered above.
+                    </p>
+                    <button disabled style={{ display: "inline-block", padding: "8px 16px", background: "#c27840", color: "#fff", borderRadius: 8, fontSize: 13, fontWeight: 600, border: "none", opacity: 0.7, cursor: "default" }}>Coming Soon {"\u2014"} $29</button>
+                    <p style={{ fontSize: 10, color: "#b8ad9e", marginTop: 6 }}>Shareable with your partner, HR department, and financial advisor.</p>
+                  </div>
+
+                </div>
+
+                <p style={{ fontSize: 10, color: "#b8ad9e", marginTop: 12, lineHeight: 1.4, fontStyle: "italic" }}>
+                  Affiliate disclosure: SmartLeave may earn a commission when you sign up through partner links above. This helps keep the calculator free. We only recommend products we'd use ourselves. Partner recommendations don't affect calculator results or editorial content.
+                </p>
+              </div>
+
+              <details style={{ marginTop: 20, fontSize: 12, color: "#9a8d80" }}>
+                <summary style={{ cursor: "pointer", fontWeight: 700, marginBottom: 8 }}>{"\uD83D\uDCDA"} All Sources & References</summary>
+                <div style={{ display: "grid", gap: 4, padding: "10px 14px", background: "#f8f6f3", borderRadius: 10 }}>
+                  {Object.values(REFS).map((r, i) => <a key={i} href={r.u} target="_blank" rel="noopener noreferrer" style={{ color: "#7a6e62", textDecoration: "none", fontSize: 11, lineHeight: 1.5 }}>{"\u2197"} {r.t}</a>)}
+                </div>
+              </details>
+
+              <div style={{ marginTop: 16, padding: "14px 20px", background: "#f5ede3", borderRadius: 12, fontSize: 11, color: "#9a8d80", lineHeight: 1.5 }}>
+                <strong>Disclaimer:</strong> Estimates based on 2026 federal EI / QPIP rules. Actual amounts determined by <a href="https://www.canada.ca/en/services/benefits/ei/ei-maternity-parental.html" target="_blank" rel="noopener noreferrer" style={{ color: "#7a6e62" }}>Service Canada</a> or QPIP. Not financial, legal, or tax advice. Self-employment benefits have additional requirements {"\u2014"} consult <a href={REFS.ei_self.u} target="_blank" rel="noopener noreferrer" style={{ color: "#7a6e62" }}>Service Canada</a> or a tax professional.
+              </div>
+            </section>
+          </main>
+        </>
+      )}
+
+      {page === "blog" && !article && (
+        <div style={{ maxWidth: 780, margin: "0 auto", padding: "40px 20px 60px" }}>
+          <h1 style={{ fontFamily: "var(--fd)", fontSize: "clamp(26px, 4vw, 36px)", marginBottom: 8, color: "#2d2520" }}>Parental Leave Guides</h1>
+          <p style={{ fontSize: 15, color: "#7a6e62", marginBottom: 32, lineHeight: 1.6 }}>Real strategies, real numbers, and real stories to help you plan your leave with confidence.</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {ARTICLES.map(a => (
+              <button key={a.id} onClick={() => setArticle(a.id)} style={{
+                ...S.card, textAlign: "left", cursor: "pointer", display: "flex", gap: 20, alignItems: "flex-start",
+                transition: "box-shadow 0.15s", border: "1px solid #e6dfd6",
+              }} onMouseOver={e => e.currentTarget.style.boxShadow = "0 4px 20px #c2784015"} onMouseOut={e => e.currentTarget.style.boxShadow = "none"}>
+                <div style={{ flex: 1 }}>
+                  <span style={S.badge(a.tagColor)}>{a.tag}</span>
+                  <h2 style={{ fontFamily: "var(--fd)", fontSize: 19, margin: "8px 0 6px", color: "#2d2520", lineHeight: 1.3 }}>{a.title}</h2>
+                  <p style={{ fontSize: 14, color: "#7a6e62", lineHeight: 1.5, margin: 0 }}>{a.preview}</p>
+                  <span style={{ fontSize: 12, color: "#a0937f", marginTop: 8, display: "inline-block" }}>{a.readTime} read {"\u2192"}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {page === "about" && (
+        <div style={{ maxWidth: 640, margin: "0 auto", padding: "48px 20px 60px" }}>
+          <h1 style={{ fontFamily: "var(--fd)", fontSize: 32, marginBottom: 16 }}>About SmartLeave</h1>
+          <div style={{ fontSize: 15, lineHeight: 1.8, color: "#4a3f35" }}>
+            <p style={{ marginBottom: 16 }}>Canadian parental leave is generous by global standards {"\u2014"} but it's also confusing. Between federal EI rules, provincial job-protection differences, employer top-ups, the standard vs. extended choice, and Quebec's entirely separate QPIP system, most families make this decision with incomplete information.</p>
+            <p style={{ marginBottom: 16 }}>SmartLeave was built to change that. It models the real financial impact of different leave-splitting scenarios, factoring in each parent's salary, their employer's top-up policies (including separate maternity vs. parental top-ups), and the sharing bonus incentive. It then gives you personalized recommendations based on your specific situation {"\u2014"} like when the lower-earning parent should take more weeks, or when a top-up mismatch means one parent's leave costs the family less.</p>
+            <p style={{ marginBottom: 16 }}>All calculations use 2026 federal EI maximums ($68,900 MIE, $729/week standard, $437/week extended) and Quebec QPIP rates ($103,000 MIE). The one-week EI waiting period is currently waived for claims starting before April 11, 2026.</p>
+            <p style={{ marginBottom: 16 }}>This tool is for planning purposes only. Always verify your eligibility and benefit amounts with Service Canada, your employer's HR department, and a qualified financial advisor.</p>
+            <h2 style={{ fontFamily: "var(--fd)", fontSize: 22, marginTop: 32, marginBottom: 12 }}>Key Statistics</h2>
+            <p style={{ marginBottom: 12 }}>In 2023{"\u2013"}24, Ontario accounted for about 52% of all EI maternity payments nationally. About 92.8% of mothers received the full 15 weeks of maternity benefits available. Meanwhile, only about 11% of fathers outside Quebec take any parental leave at all {"\u2014"} compared to 85% of fathers in Quebec, where dedicated paternity weeks exist.</p>
+            <p>The cost of raising a child from birth to age 17 averages $362,000 for a middle-income Canadian family. Getting your parental leave finances right is one of the most impactful financial decisions you'll make as a new parent.</p>
+          </div>
+        </div>
+      )}
+
+      <footer style={{ borderTop: "1px solid #e6dfd6", padding: "20px 24px", textAlign: "center", fontSize: 12, color: "#a0937f" }}>
+        <p>SmartLeave.ca {"\u00B7"} 2026 EI & QPIP Rules {"\u00B7"} Not financial advice {"\u00B7"} <a href="https://www.canada.ca/en/services/benefits/ei/ei-maternity-parental.html" target="_blank" rel="noopener noreferrer" style={{ color: "#9a8d80" }}>Verify with Service Canada</a></p>
+      </footer>
+    </Shell>
+  );
+}
+
+function StepHeader({ n, title }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+      <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#c27840", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>{n}</div>
+      <h2 style={{ fontFamily: "var(--fd)", fontSize: 20, margin: 0 }}>{title}</h2>
+    </div>
+  );
+}
+
+function Shell({ children, page, setPage, mobileNav, setMobileNav }) {
+  const navItems = [
+    { k: "calc", l: "Calculator", icon: "\uD83D\uDCCA" },
+    { k: "blog", l: "Guides", icon: "\uD83D\uDCD6" },
+    { k: "about", l: "About", icon: "\u2139\uFE0F" },
+  ];
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Source+Sans+3:wght@300;400;500;600;700;800&display=swap');
+        :root { --fd: 'DM Serif Display', Georgia, serif; --fb: 'Source Sans 3', system-ui, sans-serif; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--fb); background: #faf7f3; color: #2d2520; }
+        input[type=range] { height: 5px; border-radius: 3px; cursor: pointer; }
+        ::selection { background: #c2784033; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .fi { animation: fadeIn 0.3s ease forwards; }
+      `}</style>
+      <div style={{ minHeight: "100vh", background: "#faf7f3" }}>
+        {/* Nav */}
+        <nav style={{ background: "#fff", borderBottom: "1px solid #e6dfd6", position: "sticky", top: 0, zIndex: 100 }}>
+          <div style={{ maxWidth: 960, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 }}>
+            <button onClick={() => setPage("calc")} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 20 }}>{"\uD83C\uDF3F"}</span>
+              <span style={{ fontFamily: "var(--fd)", fontSize: 18, color: "#2d2520" }}>SmartLeave</span>
+              <span style={{ fontSize: 10, color: "#a0937f", marginLeft: 2, fontWeight: 600 }}>.ca</span>
+            </button>
+            {/* Desktop nav */}
+            <div style={{ display: "flex", gap: 4 }}>
+              {navItems.map(n => (
+                <button key={n.k} onClick={() => setPage(n.k)} style={{
+                  background: page === n.k ? "#f5ede3" : "transparent", border: "none", padding: "8px 16px",
+                  borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: page === n.k ? 700 : 500,
+                  color: page === n.k ? "#c27840" : "#7a6e62", fontFamily: "inherit",
+                  transition: "all 0.15s",
+                }}>
+                  {n.l}
+                </button>
+              ))}
+            </div>
+          </div>
+        </nav>
+        {children}
+      </div>
+    </>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(React.createElement(App));
+    </script>
 </body>
 </html>
