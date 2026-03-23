@@ -964,7 +964,7 @@ function Shell({ children, page, setPage, mobileNav, setMobileNav }) {
         ::selection { background: #c2784033; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .fi { animation: fadeIn 0.3s ease forwards; }
-        @media (max-width: 600px) { .logo-text { display: none; } }
+        @media (max-width: 600px) { .logo-text { display: none !important; } }
       `}</style>
       <div style={{ minHeight: "100vh", background: "#faf7f3" }}>
         {/* Nav */}
