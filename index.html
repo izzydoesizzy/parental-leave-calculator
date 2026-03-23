@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Canadian parental leave calculator for 2026. Model EI and QPIP benefits, employer top-ups, and leave-splitting scenarios to maximize your family's income.">
+    <meta name="description" content="Parental Leave Calculator for Canada (2026). Model EI and QPIP benefits, employer top-ups, and leave-splitting scenarios to maximize your family's income.">
     <title>Parental Leave Calculator — Canada</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -797,7 +797,7 @@ function App() {
               {/* ── NEXT STEPS: Contextual partner recommendations ── */}
               <div style={{ marginTop: 24, marginBottom: 20 }}>
                 <h3 style={{ fontFamily: "var(--fd)", fontSize: 17, marginBottom: 6 }}>{"\uD83D\uDCCB"} Your Next Steps</h3>
-                <p style={{ fontSize: 12, color: "#a0937f", marginBottom: 14 }}>Based on your results, here are actions to consider. <em>Some links below are from partners who help keep SmartLeave free.</em></p>
+                <p style={{ fontSize: 12, color: "#a0937f", marginBottom: 14 }}>Based on your results, here are actions to consider. <em>Some links below are from partners who help keep Parental Leave Calculator free.</em></p>
 
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
 
@@ -874,7 +874,7 @@ function App() {
                 </div>
 
                 <p style={{ fontSize: 10, color: "#b8ad9e", marginTop: 12, lineHeight: 1.4, fontStyle: "italic" }}>
-                  Affiliate disclosure: SmartLeave may earn a commission when you sign up through partner links above. This helps keep the calculator free. We only recommend products we'd use ourselves. Partner recommendations don't affect calculator results or editorial content.
+                  Affiliate disclosure: Parental Leave Calculator may earn a commission when you sign up through partner links above. This helps keep the calculator free. We only recommend products we'd use ourselves. Partner recommendations don't affect calculator results or editorial content.
                 </p>
               </div>
 
@@ -917,10 +917,10 @@ function App() {
 
       {page === "about" && (
         <div style={{ maxWidth: 640, margin: "0 auto", padding: "48px 20px 60px" }}>
-          <h1 style={{ fontFamily: "var(--fd)", fontSize: 32, marginBottom: 16 }}>About SmartLeave</h1>
+          <h1 style={{ fontFamily: "var(--fd)", fontSize: 32, marginBottom: 16 }}>About Parental Leave Calculator</h1>
           <div style={{ fontSize: 15, lineHeight: 1.8, color: "#4a3f35" }}>
             <p style={{ marginBottom: 16 }}>Canadian parental leave is generous by global standards {"\u2014"} but it's also confusing. Between federal EI rules, provincial job-protection differences, employer top-ups, the standard vs. extended choice, and Quebec's entirely separate QPIP system, most families make this decision with incomplete information.</p>
-            <p style={{ marginBottom: 16 }}>SmartLeave was built to change that. It models the real financial impact of different leave-splitting scenarios, factoring in each parent's salary, their employer's top-up policies (including separate maternity vs. parental top-ups), and the sharing bonus incentive. It then gives you personalized recommendations based on your specific situation {"\u2014"} like when the lower-earning parent should take more weeks, or when a top-up mismatch means one parent's leave costs the family less.</p>
+            <p style={{ marginBottom: 16 }}>Parental Leave Calculator was built to change that. It models the real financial impact of different leave-splitting scenarios, factoring in each parent's salary, their employer's top-up policies (including separate maternity vs. parental top-ups), and the sharing bonus incentive. It then gives you personalized recommendations based on your specific situation {"\u2014"} like when the lower-earning parent should take more weeks, or when a top-up mismatch means one parent's leave costs the family less.</p>
             <p style={{ marginBottom: 16 }}>All calculations use 2026 federal EI maximums ($68,900 MIE, $729/week standard, $437/week extended) and Quebec QPIP rates ($103,000 MIE). The one-week EI waiting period is currently waived for claims starting before April 11, 2026.</p>
             <p style={{ marginBottom: 16 }}>This tool is for planning purposes only. Always verify your eligibility and benefit amounts with Service Canada, your employer's HR department, and a qualified financial advisor.</p>
             <h2 style={{ fontFamily: "var(--fd)", fontSize: 22, marginTop: 32, marginBottom: 12 }}>Key Statistics</h2>
@@ -931,7 +931,7 @@ function App() {
       )}
 
       <footer style={{ borderTop: "1px solid #e6dfd6", padding: "20px 24px", textAlign: "center", fontSize: 12, color: "#a0937f" }}>
-        <p>SmartLeave.ca {"\u00B7"} 2026 EI & QPIP Rules {"\u00B7"} Not financial advice {"\u00B7"} <a href="https://www.canada.ca/en/services/benefits/ei/ei-maternity-parental.html" target="_blank" rel="noopener noreferrer" style={{ color: "#9a8d80" }}>Verify with Service Canada</a></p>
+        <p>Parental Leave Calculator {"\u00B7"} 2026 EI & QPIP Rules {"\u00B7"} Not financial advice {"\u00B7"} <a href="https://www.canada.ca/en/services/benefits/ei/ei-maternity-parental.html" target="_blank" rel="noopener noreferrer" style={{ color: "#9a8d80" }}>Verify with Service Canada</a></p>
       </footer>
     </Shell>
   );
@@ -958,6 +958,7 @@ function Shell({ children, page, setPage, mobileNav, setMobileNav }) {
         @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Source+Sans+3:wght@300;400;500;600;700;800&display=swap');
         :root { --fd: 'DM Serif Display', Georgia, serif; --fb: 'Source Sans 3', system-ui, sans-serif; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { overflow-x: hidden; }
         body { font-family: var(--fb); background: #faf7f3; color: #2d2520; }
         input[type=range] { height: 5px; border-radius: 3px; cursor: pointer; }
         ::selection { background: #c2784033; }
@@ -970,8 +971,7 @@ function Shell({ children, page, setPage, mobileNav, setMobileNav }) {
           <div style={{ maxWidth: 960, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 }}>
             <button onClick={() => setPage("calc")} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 20 }}>{"\uD83C\uDF3F"}</span>
-              <span style={{ fontFamily: "var(--fd)", fontSize: 18, color: "#2d2520" }}>SmartLeave</span>
-              <span style={{ fontSize: 10, color: "#a0937f", marginLeft: 2, fontWeight: 600 }}>.ca</span>
+              <span style={{ fontFamily: "var(--fd)", fontSize: 18, color: "#2d2520" }}>Parental Leave Calculator</span>
             </button>
             {/* Desktop nav */}
             <div style={{ display: "flex", gap: 4 }}>
