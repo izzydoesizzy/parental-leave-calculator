@@ -964,6 +964,7 @@ function Shell({ children, page, setPage, mobileNav, setMobileNav }) {
         ::selection { background: #c2784033; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .fi { animation: fadeIn 0.3s ease forwards; }
+        @media (max-width: 600px) { .logo-text { display: none; } }
       `}</style>
       <div style={{ minHeight: "100vh", background: "#faf7f3" }}>
         {/* Nav */}
@@ -971,7 +972,7 @@ function Shell({ children, page, setPage, mobileNav, setMobileNav }) {
           <div style={{ maxWidth: 960, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 }}>
             <button onClick={() => setPage("calc")} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 20 }}>{"\uD83C\uDF3F"}</span>
-              <span style={{ fontFamily: "var(--fd)", fontSize: 18, color: "#2d2520" }}>Parental Leave Calculator</span>
+              <span className="logo-text" style={{ fontFamily: "var(--fd)", fontSize: 18, color: "#2d2520" }}>Parental Leave Calculator</span>
             </button>
             {/* Desktop nav */}
             <div style={{ display: "flex", gap: 4 }}>
