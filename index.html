@@ -190,7 +190,7 @@ function Tip({ children }) {
   return (
     <span style={{ position: "relative", display: "inline-block", marginLeft: 6, cursor: "pointer" }} onClick={() => setOpen(!open)} onMouseLeave={() => setOpen(false)}>
       <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", background: "#ebe5dc", color: "#8a7d6e", fontSize: 11, fontWeight: 700 }}>?</span>
-      {open && <div style={{ position: "absolute", bottom: 26, left: -100, width: 260, background: "#2d2520", color: "#e8ddd0", padding: "12px 16px", borderRadius: 12, fontSize: 12, lineHeight: 1.5, zIndex: 99, boxShadow: "0 8px 30px rgba(0,0,0,.2)" }}>{children}</div>}
+      {open && <div style={{ position: "absolute", bottom: 26, left: "50%", transform: "translateX(-50%)", width: "min(260px, 80vw)", background: "#2d2520", color: "#e8ddd0", padding: "12px 16px", borderRadius: 12, fontSize: 12, lineHeight: 1.5, zIndex: 99, boxShadow: "0 8px 30px rgba(0,0,0,.2)" }}>{children}</div>}
     </span>
   );
 }
@@ -590,7 +590,7 @@ function App() {
                   { k: "extended", l: "Extended (18 months)", s: "33% of earnings \u00B7 up to $437/week", d: "More time at home, lower weekly income" }
                 ].map(o => (
                   <button key={o.k} onClick={() => setType(o.k)} style={{
-                    flex: 1, minWidth: 240, padding: "18px 22px", background: type === o.k ? "#fdf6f0" : "#fff",
+                    flex: 1, minWidth: "min(240px, 100%)", padding: "18px 22px", background: type === o.k ? "#fdf6f0" : "#fff",
                     border: type === o.k ? "2px solid #c27840" : "1px solid #e0d8cc", borderRadius: 14, cursor: "pointer", textAlign: "left",
                     transition: "all 0.15s", boxShadow: type === o.k ? "0 2px 12px #c2784015" : "none",
                   }}>
@@ -620,7 +620,7 @@ function App() {
               </p>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                 {/* Birthing Parent */}
-                <div style={{ ...S.card, flex: 1, minWidth: 280, borderLeft: "4px solid #c27840" }}>
+                <div style={{ ...S.card, flex: 1, minWidth: "min(280px, 100%)", borderLeft: "4px solid #c27840" }}>
                   <h3 style={{ fontFamily: "var(--fd)", fontSize: 17, margin: "0 0 16px", color: "#2d2520" }}>{"\uD83E\uDD30"} Birthing Parent</h3>
                   <Slider val={bp.sal} set={v => setBP({ ...bp, sal: v })} min={0} max={250000} step={1000} label="Annual salary" accent="#c27840" suffix="$" />
                   <div style={{ marginBottom: 14 }}>
@@ -631,7 +631,7 @@ function App() {
                   </div>
                 </div>
                 {/* Other Parent */}
-                <div style={{ ...S.card, flex: 1, minWidth: 280, borderLeft: "4px solid #5a8f6e" }}>
+                <div style={{ ...S.card, flex: 1, minWidth: "min(280px, 100%)", borderLeft: "4px solid #5a8f6e" }}>
                   <h3 style={{ fontFamily: "var(--fd)", fontSize: 17, margin: "0 0 16px", color: "#2d2520" }}>{"\uD83D\uDC76"} Other Parent</h3>
                   <Slider val={op.sal} set={v => setOP({ ...op, sal: v })} min={0} max={250000} step={1000} label="Annual salary" accent="#5a8f6e" suffix="$" />
                   <div style={{ marginBottom: 14 }}>
@@ -692,7 +692,7 @@ function App() {
 
               {showAdvanced && (
                 <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
-                  <div style={{ ...S.card, flex: 1, minWidth: 280, borderLeft: "4px solid #c27840" }}>
+                  <div style={{ ...S.card, flex: 1, minWidth: "min(280px, 100%)", borderLeft: "4px solid #c27840" }}>
                     <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 12px" }}>{"\uD83E\uDD30"} Birthing Parent Top-Ups</h4>
                     <p style={{ ...S.hint, marginBottom: 12 }}>51% of employers define these separately {"\u2014"} check your benefits package for each.</p>
                     <TopUpPicker label={"\uD83C\uDFE5 Maternity leave top-up"} hasTopUp={bp.hasMT} pct={bp.mtP} weeks={bp.mtW} onChange={(h, p, w) => setBP({ ...bp, hasMT: h, mtP: p, mtW: w })} />
@@ -709,7 +709,7 @@ function App() {
                       Self-employed <Tip>You must opt into EI special benefits at least 12 months before claiming. QPIP covers self-employed automatically with $2,000+ earnings.</Tip>
                     </label>
                   </div>
-                  <div style={{ ...S.card, flex: 1, minWidth: 280, borderLeft: "4px solid #5a8f6e" }}>
+                  <div style={{ ...S.card, flex: 1, minWidth: "min(280px, 100%)", borderLeft: "4px solid #5a8f6e" }}>
                     <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 12px" }}>{"\uD83D\uDC76"} Other Parent Top-Up</h4>
                     <TopUpPicker label="Parental leave top-up" hasTopUp={op.hasT} pct={op.tP} weeks={op.tW} onChange={(h, p, w) => setOP({ ...op, hasT: h, tP: p, tW: w })} />
                     <div style={{ marginBottom: 10 }}>
@@ -762,7 +762,7 @@ function App() {
                 ].map((x, i) => {
                   const matW = x.wks.filter(w => w.t.startsWith("Mat")), parW = x.wks.filter(w => !w.t.startsWith("Mat"));
                   return (
-                    <div key={i} style={{ ...S.card, flex: 1, minWidth: 260 }}>
+                    <div key={i} style={{ ...S.card, flex: 1, minWidth: "min(260px, 100%)" }}>
                       <h4 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 10px" }}>{x.who}</h4>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "6px 8px", fontSize: 13, color: "#6b5e52" }}>
                         {matW.length > 0 && <><div style={{ gridColumn: "1/-1", fontSize: 11, fontWeight: 700, color: "#9a8d80", textTransform: "uppercase", letterSpacing: "0.05em" }}>Maternity ({matW.length}wk)</div>
@@ -958,6 +958,7 @@ function Shell({ children, page, setPage, mobileNav, setMobileNav }) {
         @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Source+Sans+3:wght@300;400;500;600;700;800&display=swap');
         :root { --fd: 'DM Serif Display', Georgia, serif; --fb: 'Source Sans 3', system-ui, sans-serif; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { overflow-x: hidden; }
         body { font-family: var(--fb); background: #faf7f3; color: #2d2520; }
         input[type=range] { height: 5px; border-radius: 3px; cursor: pointer; }
         ::selection { background: #c2784033; }
