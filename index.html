@@ -266,133 +266,123 @@ function Stat({ label, val, sub, color }) {
   );
 }
 
-function Timeline({ r, weeklySalary }) {
-  const mw = Math.max(r.bp.wks.length, r.op.wks.length, 1);
-  const [hoverWeek, setHoverWeek] = useState(null);
+function Timeline({ r, bpSalary, opSalary }) {
+  // Aggregate consecutive weeks of the same type + top-up status into phases per parent
+  const buildPhases = (wks, salary) => {
+    if (!wks.length) return [];
+    const phases = [];
+    let cur = { type: wks[0].t, startWk: 1, weeks: 0, benefit: 0, topup: 0, hasTopUp: wks[0].tu > 0 };
+    for (let i = 0; i < wks.length; i++) {
+      const w = wks[i], samePhase = w.t === cur.type && (w.tu > 0) === cur.hasTopUp;
+      if (samePhase) { cur.weeks++; cur.benefit += w.b; cur.topup += w.tu; }
+      else { phases.push({ ...cur, wkBenefit: cur.benefit / cur.weeks, wkTopUp: cur.topup / cur.weeks }); cur = { type: w.t, startWk: i + 1, weeks: 1, benefit: w.b, topup: w.tu, hasTopUp: w.tu > 0 }; }
+    }
+    phases.push({ ...cur, wkBenefit: cur.benefit / cur.weeks, wkTopUp: cur.topup / cur.weeks });
+    return phases.map(p => ({ ...p, total: p.benefit + p.topup, wkTotal: p.wkBenefit + p.wkTopUp, wkSalary: salary / 52, pctOfSalary: salary > 0 ? Math.round(((p.wkBenefit + p.wkTopUp) / (salary / 52)) * 100) : 0 }));
+  };
 
-  // Build combined weekly data
-  const weeks = Array.from({ length: mw }, (_, i) => {
-    const bw = r.bp.wks[i], ow = r.op.wks[i];
-    return {
-      bpBen: bw ? bw.b : 0, bpTu: bw ? bw.tu : 0, bpType: bw ? bw.t : null,
-      opBen: ow ? ow.b : 0, opTu: ow ? ow.tu : 0, opType: ow ? ow.t : null,
-      get total() { return this.bpBen + this.bpTu + this.opBen + this.opTu; },
-    };
-  });
+  const bpPhases = buildPhases(r.bp.wks, bpSalary);
+  const opPhases = buildPhases(r.op.wks, opSalary);
+  const totalWeeks = Math.max(r.bp.wks.length, r.op.wks.length);
 
-  const maxVal = Math.max(weeklySalary || 0, ...weeks.map(w => w.total), 1);
-  const chartH = 200, axisW = 52, barGap = 1;
+  const friendlyType = t => t.replace("(QPIP)", "").replace("Mat", "Maternity").replace("Par", "Parental").replace("Pat", "Paternity").replace("Bonus", "Sharing Bonus").trim();
 
-  // Y-axis ticks
-  const nTicks = 4;
-  const ticks = Array.from({ length: nTicks + 1 }, (_, i) => Math.round(maxVal * (i / nTicks)));
+  const phaseColors = {
+    "Maternity": "#c27840", "Mat(QPIP)": "#c27840",
+    "Parental": "#8b6f4e", "Par(QPIP)": "#8b6f4e",
+    "Pat(QPIP)": "#5a8f6e",
+    "Bonus(QPIP)": "#4a7f5e",
+  };
 
-  // Phase markers — find where leave type changes for birthing parent
-  const phases = [];
-  let lastType = null;
-  for (let i = 0; i < mw; i++) {
-    const bw = r.bp.wks[i], ow = r.op.wks[i];
-    const t = bw ? bw.t : (ow ? ow.t : null);
-    if (t && t !== lastType) { phases.push({ week: i, label: t.replace("(QPIP)", "").replace("Mat", "Maternity").replace("Par", "Parental").replace("Pat", "Paternity").trim() }); lastType = t; }
-  }
+  const PhaseCard = ({ phase, parentLabel, parentColor, isLast }) => {
+    const color = phaseColors[phase.type] || parentColor;
+    const barW = Math.min(phase.pctOfSalary, 100);
+    return (
+      <div style={{ display: "flex", gap: 0, minHeight: 60 }}>
+        {/* Timeline rail */}
+        <div style={{ width: 24, display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ width: 12, height: 12, borderRadius: "50%", background: color, border: "2px solid #fff", boxShadow: "0 0 0 2px " + color, flexShrink: 0, marginTop: 2 }} />
+          {!isLast && <div style={{ width: 2, flex: 1, background: "#e6dfd6", marginTop: 2, marginBottom: 2 }} />}
+        </div>
+        {/* Content */}
+        <div style={{ flex: 1, paddingLeft: 10, paddingBottom: isLast ? 0 : 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 4 }}>
+            <div>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#2d2520" }}>{friendlyType(phase.type)}</span>
+              <span style={{ fontSize: 12, color: "#9a8d80", marginLeft: 6 }}>Wk {phase.startWk}{"\u2013"}{phase.startWk + phase.weeks - 1} ({phase.weeks}wk)</span>
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#2d2520", fontFamily: "var(--fd)" }}>{fmt(phase.total)}</span>
+          </div>
+          <div style={{ fontSize: 12, color: "#7a6e62", marginTop: 4, lineHeight: 1.5 }}>
+            <span>{parentLabel} receives {fmt(phase.wkBenefit)}/wk in benefits</span>
+            {phase.hasTopUp && <span> + {fmt(phase.wkTopUp)}/wk employer top-up</span>}
+            <span style={{ color: "#9a8d80" }}> = <strong style={{ color: "#2d2520" }}>{fmt(phase.wkTotal)}/wk</strong></span>
+          </div>
+          {/* Income bar */}
+          <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ flex: 1, height: 8, background: "#f0ebe4", borderRadius: 4, overflow: "hidden", maxWidth: 200 }}>
+              <div style={{ display: "flex", height: "100%", borderRadius: 4 }}>
+                <div style={{ width: (Math.min(phase.wkBenefit / phase.wkSalary, 1) * 100) + "%", background: color, transition: "width 0.3s" }} />
+                {phase.hasTopUp && <div style={{ width: (Math.min(phase.wkTopUp / phase.wkSalary, 1) * 100) + "%", background: color, opacity: 0.5, transition: "width 0.3s" }} />}
+              </div>
+            </div>
+            <span style={{ fontSize: 11, color: "#9a8d80", whiteSpace: "nowrap" }}>{phase.pctOfSalary}% of salary</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
-  const salaryPct = weeklySalary ? ((weeklySalary / maxVal) * 100) : null;
+  const ParentSection = ({ phases, label, color, salary, data }) => {
+    if (!phases.length) return null;
+    const avgPerWk = data.tot / Math.max(data.wks.length, 1);
+    return (
+      <div style={{ flex: 1, minWidth: 280 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <div style={{ width: 6, height: 24, borderRadius: 3, background: color }} />
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#2d2520", fontFamily: "var(--fd)" }}>{label}</div>
+            <div style={{ fontSize: 11, color: "#9a8d80" }}>{data.wks.length} weeks off {"\u00B7"} Avg {fmt(avgPerWk)}/wk {"\u00B7"} Total {fmt(data.tot)}</div>
+          </div>
+        </div>
+        {phases.map((p, i) => <PhaseCard key={i} phase={p} parentLabel={label.split(" ")[0]} parentColor={color} isLast={i === phases.length - 1} />)}
+      </div>
+    );
+  };
+
+  // Combined income summary bar
+  const combinedWeeklySalary = (bpSalary + opSalary) / 52;
+  const combinedWeeklyLeave = r.fam / Math.max(totalWeeks, 1);
+  const replacementPct = combinedWeeklySalary > 0 ? Math.round((combinedWeeklyLeave / combinedWeeklySalary) * 100) : 0;
 
   return (
-    <div style={{ overflowX: "auto" }}>
-      {/* Phase labels */}
-      <div style={{ display: "flex", marginLeft: axisW, marginBottom: 4 }}>
-        {phases.map((p, idx) => {
-          const nextStart = idx < phases.length - 1 ? phases[idx + 1].week : mw;
-          const widthPct = ((nextStart - p.week) / mw) * 100;
-          return (
-            <div key={idx} style={{ width: widthPct + "%", fontSize: 10, fontWeight: 600, color: "#9a8d80", textTransform: "uppercase", letterSpacing: "0.04em", paddingLeft: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {p.label}
-            </div>
-          );
-        })}
+    <div>
+      {/* Summary bar */}
+      <div style={{ background: "#f7f3ee", borderRadius: 12, padding: "14px 16px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 4 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#5c4f44" }}>Income replacement during leave</span>
+          <span style={{ fontSize: 15, fontWeight: 800, color: "#2d2520", fontFamily: "var(--fd)" }}>{replacementPct}% of combined salary</span>
+        </div>
+        <div style={{ height: 10, background: "#e6dfd6", borderRadius: 5, overflow: "hidden", position: "relative" }}>
+          <div style={{ height: "100%", width: Math.min(replacementPct, 100) + "%", background: "linear-gradient(90deg, #c27840, #5a8f6e)", borderRadius: 5, transition: "width 0.3s" }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 11, color: "#9a8d80" }}>
+          <span>Avg {fmt(combinedWeeklyLeave)}/wk on leave</span>
+          <span>vs. {fmt(combinedWeeklySalary)}/wk working</span>
+        </div>
       </div>
 
-      <div style={{ display: "flex" }}>
-        {/* Y-axis */}
-        <div style={{ width: axisW, flexShrink: 0, position: "relative", height: chartH }}>
-          {ticks.map((v, i) => (
-            <div key={i} style={{ position: "absolute", bottom: (i / nTicks) * 100 + "%", right: 4, fontSize: 9, color: "#b0a594", transform: "translateY(50%)", whiteSpace: "nowrap" }}>
-              {fmt(v)}
-            </div>
-          ))}
-        </div>
-
-        {/* Chart area */}
-        <div style={{ flex: 1, position: "relative", height: chartH, minWidth: mw * 10 }}>
-          {/* Grid lines */}
-          {ticks.map((_, i) => (
-            <div key={i} style={{ position: "absolute", bottom: (i / nTicks) * 100 + "%", left: 0, right: 0, borderBottom: "1px solid #ebe5dc" }} />
-          ))}
-
-          {/* Salary reference line */}
-          {salaryPct !== null && salaryPct <= 100 && (
-            <div style={{ position: "absolute", bottom: salaryPct + "%", left: 0, right: 0, borderBottom: "2px dashed #c05050", zIndex: 2 }}>
-              <span style={{ position: "absolute", right: 0, top: -14, fontSize: 9, color: "#c05050", fontWeight: 600, background: "#fff", padding: "0 3px", borderRadius: 3 }}>
-                Salary {fmt(weeklySalary)}/wk
-              </span>
-            </div>
-          )}
-
-          {/* Bars */}
-          <div style={{ display: "flex", gap: barGap, alignItems: "flex-end", height: "100%", position: "relative", zIndex: 1 }}>
-            {weeks.map((w, i) => {
-              const totalH = (w.total / maxVal) * 100;
-              const bpBenH = (w.bpBen / maxVal) * 100;
-              const bpTuH = (w.bpTu / maxVal) * 100;
-              const opBenH = (w.opBen / maxVal) * 100;
-              const opTuH = (w.opTu / maxVal) * 100;
-              const isHovered = hoverWeek === i;
-              return (
-                <div key={i} style={{ flex: 1, minWidth: 4, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", cursor: "pointer", position: "relative" }}
-                  onMouseEnter={() => setHoverWeek(i)} onMouseLeave={() => setHoverWeek(null)}>
-                  {/* Stacked segments bottom-to-top: BP benefit, BP top-up, OP benefit, OP top-up */}
-                  <div style={{ display: "flex", flexDirection: "column-reverse", borderRadius: "2px 2px 0 0", overflow: "hidden", opacity: isHovered ? 1 : 0.85, transition: "opacity 0.1s" }}>
-                    {w.bpBen > 0 && <div style={{ height: bpBenH + "%", minHeight: bpBenH > 0 ? 1 : 0, background: "#c27840" }} />}
-                    {w.bpTu > 0 && <div style={{ height: bpTuH + "%", minHeight: 1, background: "#e0a872" }} />}
-                    {w.opBen > 0 && <div style={{ height: opBenH + "%", minHeight: opBenH > 0 ? 1 : 0, background: "#5a8f6e" }} />}
-                    {w.opTu > 0 && <div style={{ height: opTuH + "%", minHeight: 1, background: "#8ac4a0" }} />}
-                  </div>
-
-                  {/* Hover tooltip */}
-                  {isHovered && (
-                    <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)", background: "#2d2520", color: "#e8ddd0", padding: "8px 12px", borderRadius: 10, fontSize: 11, lineHeight: 1.6, zIndex: 20, whiteSpace: "nowrap", boxShadow: "0 4px 16px rgba(0,0,0,.2)", pointerEvents: "none" }}>
-                      <div style={{ fontWeight: 700, marginBottom: 2 }}>Week {i + 1}{w.bpType ? ` \u2014 ${w.bpType}` : (w.opType ? ` \u2014 ${w.opType}` : "")}</div>
-                      {w.bpBen > 0 && <div>Birthing EI: {fmt(w.bpBen)}</div>}
-                      {w.bpTu > 0 && <div>Birthing top-up: {fmt(w.bpTu)}</div>}
-                      {w.opBen > 0 && <div>Other EI: {fmt(w.opBen)}</div>}
-                      {w.opTu > 0 && <div>Other top-up: {fmt(w.opTu)}</div>}
-                      <div style={{ borderTop: "1px solid #5c4f44", marginTop: 3, paddingTop: 3, fontWeight: 700 }}>Total: {fmt(w.total)}</div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* X-axis labels */}
-          <div style={{ display: "flex", marginTop: 3 }}>
-            {weeks.map((_, i) => (
-              (i === 0 || (i + 1) % 5 === 0) ? (
-                <div key={i} style={{ position: "absolute", left: `${(i / mw) * 100}%`, fontSize: 9, color: "#b0a594" }}>{i + 1}</div>
-              ) : null
-            ))}
-          </div>
-        </div>
+      {/* Parent timelines side by side on desktop, stacked on mobile */}
+      <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+        <ParentSection phases={bpPhases} label={"\uD83E\uDD30 Birthing Parent"} color="#c27840" salary={bpSalary} data={r.bp} />
+        <ParentSection phases={opPhases} label={"\uD83D\uDC76 Other Parent"} color="#5a8f6e" salary={opSalary} data={r.op} />
       </div>
 
       {/* Legend */}
-      <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 14, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#7a6e62" }}><div style={{ width: 10, height: 10, borderRadius: 2, background: "#c27840" }} /> Birthing EI/QPIP</div>
-        {r.bp.top > 0 && <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#7a6e62" }}><div style={{ width: 10, height: 10, borderRadius: 2, background: "#e0a872" }} /> Birthing top-up</div>}
-        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#7a6e62" }}><div style={{ width: 10, height: 10, borderRadius: 2, background: "#5a8f6e" }} /> Other EI/QPIP</div>
-        {r.op.top > 0 && <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#7a6e62" }}><div style={{ width: 10, height: 10, borderRadius: 2, background: "#8ac4a0" }} /> Other top-up</div>}
-        {weeklySalary && <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#c05050" }}><div style={{ width: 12, height: 0, borderBottom: "2px dashed #c05050" }} /> Combined salary</div>}
+      <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 16, flexWrap: "wrap", fontSize: 11, color: "#9a8d80" }}>
+        <span>Solid bar = EI/QPIP benefits</span>
+        {(r.bp.top > 0 || r.op.top > 0) && <span>{"\u00B7"} Faded bar = employer top-up</span>}
+        <span>{"\u00B7"} % shown is relative to that parent's salary</span>
       </div>
     </div>
   );
@@ -892,7 +882,7 @@ function App() {
                 </div>
               )}
 
-              <div style={S.card}><h3 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 12px" }}>Income During Leave</h3><Timeline r={result} weeklySalary={(bp.sal + op.sal) / 52} /></div>
+              <div style={S.card}><h3 style={{ fontFamily: "var(--fd)", fontSize: 15, margin: "0 0 12px" }}>Income During Leave</h3><Timeline r={result} bpSalary={bp.sal} opSalary={op.sal} /></div>
 
               <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
                 {[
